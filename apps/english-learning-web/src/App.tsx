@@ -2,7 +2,8 @@ import { useState } from 'react'
 import type { Skill, Material, Mission } from './types'
 import { useSSE } from './hooks/useSSE'
 import { TopBar } from './components/TopBar'
-import { SkillHub } from './components/SkillHub'
+import { LevelPath } from './components/LevelPath'
+import { SkillCard } from './components/SkillCard'
 import { RightPanel } from './components/RightPanel'
 import { AIChat } from './components/AIChat'
 import { SkillDetailModal } from './components/Modals/SkillDetailModal'
@@ -44,15 +45,14 @@ export function App() {
     <div className="app">
       <TopBar />
       <div className="main">
-        <SkillHub
-          skills={SKILLS}
-          onSkillClick={handleSkillClick}
-          onPractice={() => {
-            const speaking = SKILLS.find(s => s.id === 'speaking')
-            if (speaking !== undefined) setSelectedSkill(speaking)
-          }}
-          onUpload={() => { setShowUpload(true) }}
-        />
+        <div className="left">
+          <LevelPath level={12} currentStage={3} totalStages={5} />
+          <div className="skill-grid">
+            {SKILLS.map(s => (
+              <SkillCard key={s.id} skill={s} onClick={handleSkillClick} />
+            ))}
+          </div>
+        </div>
         <RightPanel
           materials={MATERIALS}
           missions={MISSIONS}

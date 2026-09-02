@@ -60,62 +60,196 @@ body {
 /* ── Main Layout ── */
 .main { display: grid; grid-template-columns: 1fr 360px; overflow: hidden; }
 
-/* ── Left: Skill Hub ── */
-.left { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, #F5F7FF 0%, #EEF2FF 50%, #E0E7FF 100%); overflow: hidden; }
-.left::before { content: ''; position: absolute; top: -200px; right: -200px; width: 600px; height: 600px; background: radial-gradient(circle, rgba(129,140,248,.15) 0%, transparent 70%); pointer-events: none; }
+/* ── Left Panel ── */
+.left {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 32px;
+  gap: 24px;
+  background: linear-gradient(180deg, #F5F7FF 0%, #EEF2FF 50%, #E0E7FF 100%);
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 
-/* Floating particles */
-.particles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.pt { position: absolute; border-radius: 50%; animation: ptFloat linear infinite; opacity: 0; }
-@keyframes ptFloat { 0% { transform: translateY(100vh) scale(0); opacity: 0; } 10% { opacity: .6; } 90% { opacity: .6; } 100% { transform: translateY(-100px) scale(1); opacity: 0; } }
-.pt1 { left: 10%; width: 8px; height: 8px; background: var(--secondary); animation-duration: 8s; }
-.pt2 { left: 25%; width: 6px; height: 6px; background: var(--accent); animation-duration: 10s; animation-delay: 1s; }
-.pt3 { left: 45%; width: 10px; height: 10px; background: var(--primary); animation-duration: 7s; animation-delay: 2s; }
-.pt4 { left: 65%; width: 6px; height: 6px; background: var(--tl); animation-duration: 9s; animation-delay: 3s; }
-.pt5 { left: 80%; width: 8px; height: 8px; background: var(--pu); animation-duration: 11s; animation-delay: .5s; }
+/* ── Level Path ── */
+.level-path {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 18px 24px;
+  background: var(--bg2);
+  border-radius: var(--r2);
+  border: 2px solid var(--bd);
+  box-shadow: var(--shadow);
+  flex-shrink: 0;
+}
+.level-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 64px;
+}
+.level-info-label { font-size: 10px; font-weight: 600; color: var(--tx3); text-transform: uppercase; letter-spacing: 1px; }
+.level-info-num { font-size: 32px; font-weight: 800; background: linear-gradient(135deg, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; line-height: 1.1; }
+.level-info-stage { font-size: 11px; color: var(--accent); font-weight: 700; margin-top: 2px; }
 
-/* Skill Hub Center */
-.skill-hub { position: relative; width: 480px; height: 480px; display: flex; align-items: center; justify-content: center; }
+.level-track { display: flex; align-items: center; flex: 1; }
+.level-segment { display: flex; flex-direction: column; align-items: center; position: relative; flex: 1; }
+.level-segment:first-child { flex: 0; }
+.level-node {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid var(--bd);
+  background: var(--bg2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--tx3);
+  z-index: 2;
+  flex-shrink: 0;
+  transition: .3s;
+}
+.level-node.done { background: var(--primary); color: #fff; border-color: var(--primary); }
+.level-node.current {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(79,70,229,.25), 0 0 16px rgba(79,70,229,.2);
+  animation: nodePulse 2s ease-in-out infinite;
+}
+@keyframes nodePulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(79,70,229,.25), 0 0 16px rgba(79,70,229,.2); }
+  50% { box-shadow: 0 0 0 6px rgba(79,70,229,.15), 0 0 24px rgba(79,70,229,.3); }
+}
+.level-stage-label { font-size: 10px; color: var(--tx3); font-weight: 600; margin-top: 6px; white-space: nowrap; }
+.level-line {
+  position: absolute;
+  top: 18px;
+  right: 50%;
+  width: 100%;
+  height: 3px;
+  background: var(--bd);
+  z-index: 1;
+  transform: translateX(50%);
+}
+.level-line.done { background: var(--primary); }
 
-/* Center Level Badge */
-.center-badge { position: absolute; width: 140px; height: 140px; border-radius: 50%; background: var(--bg2); border: 4px solid var(--bd); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; box-shadow: var(--shadow-lg); }
-.center-level { font-size: 12px; color: var(--tx3); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
-.center-num { font-size: 56px; font-weight: 800; background: linear-gradient(135deg, var(--primary), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; line-height: 1; margin: -4px 0; }
-.center-title { font-size: 13px; color: var(--tx2); font-weight: 600; }
-.center-stage { font-size: 11px; color: var(--accent); font-weight: 700; margin-top: 4px; padding: 3px 12px; background: var(--accent-l); border-radius: 10px; }
+/* ── Skill Card Grid ── */
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+}
 
-/* Skill Orbs */
-.skill-orb { position: absolute; width: 140px; height: 140px; border-radius: 50%; cursor: pointer; transition: .3s; }
-.skill-orb:hover { transform: scale(1.1); }
-.skill-orb:hover .skill-ring { stroke-width: 8; }
+.skill-card {
+  background: var(--bg2);
+  border: 2px solid var(--bd);
+  border-radius: var(--r2);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  cursor: pointer;
+  transition: .2s;
+  box-shadow: var(--shadow);
+}
+.skill-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary);
+}
 
-/* SVG Progress Ring */
+.skill-card-top { display: flex; align-items: center; gap: 14px; }
+
+.skill-ring-wrap {
+  width: 68px;
+  height: 68px;
+  position: relative;
+  flex-shrink: 0;
+}
+.skill-ring-svg { width: 100%; height: 100%; }
 .skill-ring-bg { fill: none; stroke: var(--bg3); stroke-width: 6; }
-.skill-ring { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 1s ease-out; transform: rotate(-90deg); transform-origin: center; }
+.skill-ring { fill: none; stroke-width: 6; stroke-linecap: round; }
 
-/* Skill Icon */
-.skill-icon-wrap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.skill-icon { width: 52px; height: 52px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 26px; margin-bottom: 6px; box-shadow: var(--shadow); }
-.skill-name { font-size: 12px; font-weight: 700; color: var(--tx); }
-.skill-score { font-size: 20px; font-weight: 800; }
-.skill-sub { font-size: 10px; color: var(--tx3); font-weight: 600; }
+.skill-ring-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
 
-/* Position orbs */
-.orb-listening { top: 20px; left: 50%; transform: translateX(-50%); }
-.orb-speaking { top: 50%; right: 20px; transform: translateY(-50%); }
-.orb-reading { bottom: 20px; left: 50%; transform: translateX(-50%); }
-.orb-writing { top: 50%; left: 20px; transform: translateY(-50%); }
+.skill-card-info { flex: 1; min-width: 0; }
+.skill-card-name { font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 6px; }
+.skill-cefr {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 8px;
+}
 
-/* Connecting lines */
-.connections { position: absolute; inset: 0; pointer-events: none; }
-.conn-line { stroke: var(--bd); stroke-width: 2; stroke-dasharray: 6 4; opacity: .5; }
+.skill-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.skill-score-num { font-size: 24px; font-weight: 800; }
+.skill-score-label { font-size: 12px; color: var(--tx3); }
+.skill-task-count { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-l); padding: 2px 8px; border-radius: 6px; }
 
-/* Quick actions */
-.quick-actions { display: flex; gap: 12px; z-index: 10; margin-top: 16px; }
-.qa-btn { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: var(--r2); border: 2px solid var(--bd); background: var(--bg2); font-family: var(--f); font-size: 13px; font-weight: 600; color: var(--tx2); cursor: pointer; transition: .2s; box-shadow: var(--shadow); }
-.qa-btn:hover { border-color: var(--primary); color: var(--primary); transform: translateY(-3px); box-shadow: 0 6px 0 rgba(79,70,229,.15); }
-.qa-btn.pr { background: linear-gradient(135deg, var(--primary), var(--secondary)); border-color: transparent; color: #fff; box-shadow: 0 4px 0 rgba(79,70,229,.3); }
-.qa-btn.pr:hover { box-shadow: 0 6px 0 rgba(79,70,229,.4); }
+.skill-tasks { display: flex; flex-direction: column; gap: 6px; }
+.skill-task { display: flex; align-items: center; gap: 8px; }
+.skill-task-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 2px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+  transition: .2s;
+}
+.skill-task-text { font-size: 12px; font-weight: 500; }
+
+/* ── Responsive: Tablet (≤1024px) ── */
+@media (max-width: 1024px) {
+  .main { grid-template-columns: 1fr 300px; }
+  .left { padding: 24px 20px; }
+}
+
+/* ── Responsive: Small tablet (≤860px) ── */
+@media (max-width: 860px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .right { border-left: none; border-top: 3px solid var(--bd); max-height: 40vh; }
+  .skill-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Responsive: Phone (≤520px) ── */
+@media (max-width: 520px) {
+  .topbar { padding: 0 16px; }
+  .tb-logo-tx { font-size: 16px; }
+  .tb-center { gap: 12px; }
+  .tb-level { padding: 6px 12px; font-size: 12px; }
+  .tb-xp { padding: 6px 10px; }
+  .tb-xp-bar { width: 60px; }
+  .left { padding: 16px; gap: 16px; }
+  .level-path { flex-direction: column; gap: 12px; padding: 14px 16px; }
+  .level-track { width: 100%; }
+  .right { max-height: 50vh; }
+}
 
 /* ── Right Panel ── */
 .right { background: var(--bg2); border-left: 3px solid var(--bd); display: flex; flex-direction: column; overflow: hidden; }

@@ -61,7 +61,7 @@ export function SkillHub({ skills, onSkillClick, onPractice, onUpload }: SkillHu
         </svg>
 
         {skills.map((skill, i) => (
-          <SkillOrb key={skill.id} skill={skill} position={positions[i]} onClick={onSkillClick} />
+          <SkillOrb key={skill.id} skill={skill} position={positions[i] ?? ''} onClick={onSkillClick} />
         ))}
 
         <div className="center-badge">
