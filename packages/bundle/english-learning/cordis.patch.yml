@@ -18,7 +18,6 @@
     # Bundle plugin (logs load message)
     - id: english-learning
       name: '@deepseek-ai/dsh-english-learning'
-      inject: [tools, skills]
 
     # Task runner (headless mode)
     - id: code-runtime
@@ -49,6 +48,9 @@
         providers:
           opencode:
             apiKeyEnv: OPENCODE_API_KEY
+            customUserAgent: "opencode/1.18.0"
+            headers:
+              x-opencode-client: "cli"
 
     # Core session/agent
     - id: session

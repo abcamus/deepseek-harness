@@ -23,6 +23,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -31,7 +33,25 @@ import type {} from '@deepseek-ai/dsh-agent'
 export const name = 'english-learning'
 
 /** Core services required by this bundle's plugin. */
-export const inject = ['tools', 'skills', 'web', 'webServer', 'agents', 'agentDefaultModel'] as const
+export const inject = ['tools', 'skills', 'web', 'webServer', 'agents', 'llm', 'settings', 'agentDefaultModel'] as const
+
+/** Settings namespace for the english-learning model list. */
+const NS = settingsNamespace('english-learning')
+
+/** Schema for the added-models list stored in settings.yaml. */
+const ADDED_MODELS_SCHEMA = z.object({
+  addedModels: z.array(z.object({
+    provider: z.string().required(),
+    model: z.string().required(),
+    name: z.string().required(),
+    description: z.string(),
+  })),
+})
+
+/** Shape of the english-learning settings section. */
+interface AddedModelsSettings {
+  addedModels: Array<{ provider: string; model: string; name: string; description?: string }>
+}
 
 /** Persistent agent handle for the chat session. */
 interface ChatAgent {
@@ -113,6 +133,131 @@ export function apply(ctx: Context): void {
     for (const client of sseClients) {
       if (!client.destroyed) client.write(payload)
     }
+  }
+
+  // Register the added-models settings section.
+  const defaultAddedModels: AddedModelsSettings = { addedModels: [] }
+  let addedModelsSource: AddedModelsSettings = defaultAddedModels
+
+  // Capture webServer reference before inject (sctx may not have it)
+  const webServerRef = ctx.webServer
+
+  const scope = ctx.settings.register(NS, ADDED_MODELS_SCHEMA, { base: { addedModels: [] } })
+
+  function syncSource(): void {
+    const models = scope.get()
+    addedModelsSource = { addedModels: models.addedModels }
+  }
+  syncSource()
+  ctx.effect(() => () => { addedModelsSource = defaultAddedModels })
+  scope.watch(() => { syncSource() })
+
+  // Settings model endpoint: saves the user's active model selection
+  ctx.effect(() => webServerRef.register({
+    kind: 'exact',
+    path: '/api/settings/model',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+        return
+      }
+      try {
+        const body = JSON.parse(await readBody(req)) as { provider?: string; model?: string }
+        if (typeof body.provider !== 'string' || typeof body.model !== 'string') {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing provider or model' }))
+          return
+        }
+        await ctx.agentDefaultModel.saveSelection({ provider: body.provider, model: body.model })
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, selection: { provider: body.provider, model: body.model } }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: settings model error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: settings model endpoint')
+
+  // Added models endpoint: GET reads, POST adds, DELETE removes
+  ctx.effect(() => webServerRef.register({
+    kind: 'exact',
+    path: '/api/models/added',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method === 'GET') {
+          const addedModels = addedModelsSource.addedModels
+          const sel = ctx.agentDefaultModel.currentSelection()
+          const activeModel = (sel.provider && sel.model) ? { provider: sel.provider, model: sel.model } : undefined
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ addedModels, activeModel }))
+          return
+        }
+        if (req.method === 'POST') {
+          const body = JSON.parse(await readBody(req)) as {
+            provider?: string
+            model?: string
+            name?: string
+            description?: string
+          }
+          if (typeof body.provider !== 'string' || typeof body.model !== 'string' || typeof body.name !== 'string') {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Missing provider, model, or name' }))
+            return
+          }
+          const current = addedModelsSource
+          const exists = current.addedModels.some(m => m.provider === body.provider && m.model === body.model)
+          const nextModels = exists
+            ? current.addedModels
+            : [...current.addedModels, {
+              provider: body.provider,
+              model: body.model,
+              name: body.name,
+              ...body.description === undefined ? {} : { description: body.description },
+            }]
+          await scope.update({ addedModels: nextModels })
+          if (!exists) await ctx.agentDefaultModel.saveSelection({ provider: body.provider, model: body.model })
+          const sel = ctx.agentDefaultModel.currentSelection()
+          const nextActive = exists ? { provider: sel.provider, model: sel.model } : { provider: body.provider, model: body.model }
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, addedModels: nextModels, activeModel: nextActive }))
+          return
+        }
+        if (req.method === 'DELETE') {
+          const body = JSON.parse(await readBody(req)) as { provider?: string; model?: string }
+          if (typeof body.provider !== 'string' || typeof body.model !== 'string') {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Missing provider or model' }))
+            return
+          }
+          const current = addedModelsSource
+          const nextModels = current.addedModels.filter(m => !(m.provider === body.provider && m.model === body.model))
+          const sel = ctx.agentDefaultModel.currentSelection()
+          const wasActive = sel.provider === body.provider && sel.model === body.model
+          await scope.update({ addedModels: nextModels })
+          if (wasActive) await ctx.agentDefaultModel.saveSelection({ provider: '', model: '' })
+          const nextActive = wasActive ? undefined : { provider: sel.provider, model: sel.model }
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, addedModels: nextModels, activeModel: nextActive }))
+          return
+        }
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: added models error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: added models endpoint')
+
+  /** Read the active model selection from agent-default-model. */
+  function getActiveModel(): { provider: string; model: string } | undefined {
+    const sel = ctx.agentDefaultModel.currentSelection()
+    return (sel.provider && sel.model) ? { provider: sel.provider, model: sel.model } : undefined
   }
 
   /** Serve a static file from the dist directory. */
@@ -237,20 +382,21 @@ export function apply(ctx: Context): void {
 
         // Create agent on first message
         if (chatAgent === undefined) {
-          const selection = ctx.agentDefaultModel.currentSelection() as {
-            provider: string
-            model: string
-            reasoningEffort?: string
+          // Read model from agent-default-model settings
+          const activeModel = getActiveModel()
+          if (activeModel === undefined) {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'No model selected. Please add and select a model in Settings.' }))
+            return
           }
-          console.log(`english-learning: using model ${selection.provider}/${selection.model}`)
+          console.log(`english-learning: using model ${activeModel.provider}/${activeModel.model}`)
           const sessionId = SessionId(`english-learning-chat-${Date.now()}`)
           const handle = await ctx.agents.create({
             sessionId,
             meta: { cwd: process.cwd() },
             agentOptions: {
-              provider: selection.provider,
-              model: selection.model,
-              ...selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort },
+              provider: activeModel.provider,
+              model: activeModel.model,
             },
           })
           chatAgent = {
@@ -278,7 +424,150 @@ export function apply(ctx: Context): void {
     },
   }), 'english-learning: chat endpoint')
 
+  // Available models endpoint: returns all models from all registered adapters
+  const webServerForAvailable = ctx.webServer
+  ctx.effect(() => webServerForAvailable.register({
+    kind: 'exact',
+    path: '/api/models/available',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+        return
+      }
+      try {
+        const entries = ctx.llm.listConfigurableProviders()
+        const results: Array<{
+          provider: string
+          displayName: string
+          models: Array<{ id: string; name: string; description?: string }>
+        }> = []
+        for (const entry of entries) {
+          try {
+            const models = await ctx.llm.listModels(entry.provider)
+            if (models.length > 0) {
+              results.push({
+                provider: entry.provider,
+                displayName: entry.displayName,
+                models: models.map((m: { id: string; name: string; description?: string }) => ({
+                  id: m.id,
+                  name: m.name,
+                  ...m.description === undefined ? {} : { description: m.description },
+                })),
+              })
+            }
+          } catch {
+            // Skip providers that fail to list models
+          }
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ providers: results }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: available models error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: available models endpoint')
+
+  // Providers endpoint: lists all configurable LLM providers
+  const webServerForProviders = ctx.webServer
+  ctx.effect(() => webServerForProviders.register({
+    kind: 'exact',
+    path: '/api/models/providers',
+    handler: (req: IncomingMessage, res: ServerResponse) => {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+        return
+      }
+      try {
+        const entries = ctx.llm.listConfigurableProviders()
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ providers: entries }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: providers error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: providers endpoint')
+
+  // Model discovery endpoint: interrogates a provider for available models
+  const webServerForDiscover = ctx.webServer
+  ctx.effect(() => webServerForDiscover.register({
+    kind: 'exact',
+    path: '/api/models/discover',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+        return
+      }
+      try {
+        const body = JSON.parse(await readBody(req)) as { provider?: string; baseURL?: string; api?: string; apiKey?: string }
+        const request: { provider?: string; baseURL?: string; api?: string; apiKey?: string } = {}
+        if (typeof body.provider === 'string' && body.provider.length > 0) request.provider = body.provider
+        if (typeof body.baseURL === 'string' && body.baseURL.length > 0) request.baseURL = body.baseURL
+        if (typeof body.api === 'string' && body.api.length > 0) request.api = body.api
+        if (typeof body.apiKey === 'string' && body.apiKey.length > 0) request.apiKey = body.apiKey
+
+        const llmEntries = ctx.llm.listConfigurableProviders()
+
+        // Helper: discover models for one provider
+        type DiscoveredModelEntry = { id: string; name?: string; description?: string; contextWindow?: number; maxTokens?: number }
+        const discoverOne = async (providerId: string): Promise<DiscoveredModelEntry[]> => {
+          const entry = llmEntries.find(e => e.provider === providerId)
+          if (entry?.settingsNs !== undefined) {
+            try {
+              return await ctx.llm.discoverModels(entry.settingsNs, { ...request, provider: providerId })
+            } catch {
+              // Discovery not registered; fall back to listModels
+            }
+          }
+          try {
+            const listed = await ctx.llm.listModels(providerId)
+            return listed.map(m => ({
+              id: m.id,
+              name: m.name,
+              ...m.description === undefined ? {} : { description: m.description },
+            }))
+          } catch {
+            return []
+          }
+        }
+
+        if (request.provider !== undefined) {
+          // Single provider discovery
+          const models = await discoverOne(request.provider)
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ providers: [{ provider: request.provider, models }] }))
+        } else {
+          // Discover from ALL providers
+          type ProviderResult = { provider: string; displayName: string; models: DiscoveredModelEntry[] }
+          const results: ProviderResult[] = []
+          for (const entry of llmEntries) {
+            const models = await discoverOne(entry.provider)
+            if (models.length > 0) {
+              results.push({ provider: entry.provider, displayName: entry.displayName, models })
+            }
+          }
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ providers: results }))
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: model discovery error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: model discovery endpoint')
+
   // Claim the webserver fallback seat to serve the React app dist
+  console.log('[english-learning] registering fallback handler')
   const webServerForFallback = ctx.webServer
   ctx.effect(() => webServerForFallback.registerFallback(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
