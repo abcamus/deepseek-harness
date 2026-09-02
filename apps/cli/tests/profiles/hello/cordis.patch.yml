@@ -1,0 +1,7 @@
+# Hello profile patch: adds the hello runner and startup to the base profile
+- id: hello-startup
+  name: '@deepseek-ai/dsh-hello/startup'
+  config: {}
+- id: hello-runner
+  name: '@deepseek-ai/dsh-hello'
+  config: {}

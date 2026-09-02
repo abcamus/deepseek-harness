@@ -1,0 +1,15 @@
+{
+  "name": "@deepseek-ai/dsh-hello-profile",
+  "description": "Hello profile for dsh hello command",
+  "version": "0.1.0",
+  "private": true,
+  "dsh": {
+    "profile": {
+      "bundles": ["@deepseek-ai/dsh-hello"],
+      "patchReload": "startup"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-hello": "workspace:^"
+  }
+}

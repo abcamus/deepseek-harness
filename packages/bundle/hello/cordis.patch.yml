@@ -1,0 +1,12 @@
+# The dsh-hello bundle patch: a simple hello world app.
+# It mounts no Host, HTTP server, Web runtime, or browser plugin.
+
+- insert:
+    - id: hello-startup
+      name: '@deepseek-ai/dsh-hello/startup'
+
+    - id: hello-runner
+      name: '@deepseek-ai/dsh-hello'
+      inject: [helloStartup]
+      config:
+        message: !!js ctx.helloStartup.message
