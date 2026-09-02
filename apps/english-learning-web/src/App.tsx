@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import type { Skill, Material, Mission } from './types'
+import type { Skill, Material, Mission, Settings } from './types'
+import { DEFAULT_SETTINGS } from './types'
 import { useSSE } from './hooks/useSSE'
 import { TopBar } from './components/TopBar'
 import { LevelPath } from './components/LevelPath'
 import { SkillCard } from './components/SkillCard'
 import { RightPanel } from './components/RightPanel'
 import { AIChat } from './components/AIChat'
+import { SettingsPage } from './components/SettingsPage'
 import { SkillDetailModal } from './components/Modals/SkillDetailModal'
 import { UploadModal } from './components/Modals/UploadModal'
 import { AIFindModal } from './components/Modals/AIFindModal'
@@ -35,6 +37,8 @@ export function App() {
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
   const [showUpload, setShowUpload] = useState(false)
   const [showAiFind, setShowAiFind] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
 
   const handleSkillClick = (id: string) => {
     const skill = SKILLS.find(s => s.id === id)
@@ -43,23 +47,32 @@ export function App() {
 
   return (
     <div className="app">
-      <TopBar />
-      <div className="main">
-        <div className="left">
-          <LevelPath level={12} currentStage={3} totalStages={5} />
-          <div className="skill-grid">
-            {SKILLS.map(s => (
-              <SkillCard key={s.id} skill={s} onClick={handleSkillClick} />
-            ))}
-          </div>
-        </div>
-        <RightPanel
-          materials={MATERIALS}
-          missions={MISSIONS}
-          skills={SKILLS}
-          onUpload={() => { setShowUpload(true) }}
+      <TopBar onSettingsClick={() => { setShowSettings(true) }} />
+
+      {showSettings ? (
+        <SettingsPage
+          settings={settings}
+          onSave={setSettings}
+          onBack={() => { setShowSettings(false) }}
         />
-      </div>
+      ) : (
+        <div className="main">
+          <div className="left">
+            <LevelPath level={12} currentStage={3} totalStages={5} />
+            <div className="skill-grid">
+              {SKILLS.map(s => (
+                <SkillCard key={s.id} skill={s} onClick={handleSkillClick} />
+              ))}
+            </div>
+          </div>
+          <RightPanel
+            materials={MATERIALS}
+            missions={MISSIONS}
+            skills={SKILLS}
+            onUpload={() => { setShowUpload(true) }}
+          />
+        </div>
+      )}
 
       <AIChat messages={messages} status={status} onSend={(text) => { void sendMessage(text) }} />
 

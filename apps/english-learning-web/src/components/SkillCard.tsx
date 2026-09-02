@@ -31,7 +31,7 @@ export function SkillCard({ skill, onClick }: SkillCardProps) {
       if (t < 1) raf = requestAnimationFrame(animate)
     }
     raf = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(raf)
+    return () => { cancelAnimationFrame(raf) }
   }, [skill.score])
 
   const doneCount = skill.done.filter(Boolean).length

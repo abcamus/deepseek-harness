@@ -38,3 +38,58 @@ export interface ChatMessage {
 }
 
 export type SSEStatus = 'connecting' | 'connected' | 'disconnected'
+
+export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'
+
+export interface Settings {
+  name: string
+  currentLevel: CEFRLevel
+  targetLevel: CEFRLevel
+  dailyGoal: number
+  responseLanguage: 'zh' | 'en' | 'mixed'
+  responseStyle: 'concise' | 'detailed' | 'tutor'
+  uiLanguage: 'zh' | 'en'
+  theme: 'light' | 'dark' | 'system'
+  provider: string
+  model: string
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  name: '',
+  currentLevel: 'B1',
+  targetLevel: 'C1',
+  dailyGoal: 30,
+  responseLanguage: 'mixed',
+  responseStyle: 'tutor',
+  uiLanguage: 'zh',
+  theme: 'light',
+  provider: '',
+  model: '',
+}
+
+export interface DiscoveredModel {
+  id: string
+  name?: string
+  description?: string
+  contextWindow?: number
+  maxTokens?: number
+}
+
+export interface DiscoveredProvider {
+  provider: string
+  displayName: string
+  models: DiscoveredModel[]
+}
+
+export interface AddedModel {
+  provider: string
+  model: string
+  name: string
+  description?: string | undefined
+}
+
+export interface ConfigurableProvider {
+  provider: string
+  displayName: string
+  settingsNs?: string
+}

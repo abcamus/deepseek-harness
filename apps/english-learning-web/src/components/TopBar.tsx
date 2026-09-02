@@ -1,4 +1,8 @@
-export function TopBar() {
+interface TopBarProps {
+  onSettingsClick?: () => void
+}
+
+export function TopBar({ onSettingsClick }: TopBarProps) {
   return (
     <div className="topbar">
       <div className="tb-left">
@@ -20,7 +24,7 @@ export function TopBar() {
       <div className="tb-right">
         <div className="tb-stat tb-fire">🔥 7天</div>
         <button className="tb-btn" title="上传资料">📁</button>
-        <button className="tb-btn" title="设置">⚙️</button>
+        <button className="tb-btn" title="设置" onClick={onSettingsClick}>⚙️</button>
       </div>
     </div>
   )
