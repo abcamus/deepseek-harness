@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Routes, Route } from 'react-router'
+import { Routes, Route, useLocation } from 'react-router'
 import type { Skill, Material, Mission, Settings } from './types'
 import { DEFAULT_SETTINGS } from './types'
 import { useSSE } from './hooks/useSSE'
@@ -35,6 +35,7 @@ const MISSIONS: Mission[] = [
 
 export function App() {
   const { messages, status, sendMessage } = useSSE()
+  const location = useLocation()
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
   const [showUpload, setShowUpload] = useState(false)
   const [showAiFind, setShowAiFind] = useState(false)
@@ -82,7 +83,9 @@ export function App() {
         />
       </Routes>
 
-      <AIChat messages={messages} status={status} onSend={(text) => { void sendMessage(text) }} />
+      {location.pathname !== '/settings' && (
+        <AIChat messages={messages} status={status} onSend={(text) => { void sendMessage(text) }} />
+      )}
 
       <SkillDetailModal skill={selectedSkill} onClose={() => { setSelectedSkill(null) }} />
       {showUpload && <UploadModal onClose={() => { setShowUpload(false) }} />}
