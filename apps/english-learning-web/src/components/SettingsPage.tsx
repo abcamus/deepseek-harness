@@ -27,6 +27,7 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
   const setTab = (t: Tab) => { setSearchParams({ tab: t }) }
   const [draft, setDraft] = useState<Settings>({ ...settings })
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
   const { setActiveModel } = useModels()
 
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) => {
@@ -40,6 +41,8 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
     }
     onSave(draft)
     setSaving(false)
+    setSaved(true)
+    setTimeout(() => { setSaved(false) }, 2000)
   }
 
   const handleSelectModel = async (provider: string, model: string) => {
@@ -203,6 +206,8 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
             {saving ? '保存中…' : '保存设置'}
           </button>
         </div>
+
+        {saved && <div className="settings-toast">✓ 设置已保存</div>}
       </div>
     </div>
   )
