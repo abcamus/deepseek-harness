@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router'
 import type { Settings, CEFRLevel } from '../types'
 import { useModels } from '../hooks/useModels'
 import { ProviderSettings } from './ProviderSettings'
@@ -6,7 +7,6 @@ import { ProviderSettings } from './ProviderSettings'
 interface SettingsPageProps {
   settings: Settings
   onSave: (s: Settings) => void
-  onBack: () => void
 }
 
 const CEFR_OPTIONS: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
@@ -20,7 +20,8 @@ const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'display', icon: '🎨', label: '显示设置' },
 ]
 
-export function SettingsPage({ settings, onSave, onBack }: SettingsPageProps) {
+export function SettingsPage({ settings, onSave }: SettingsPageProps) {
+  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('profile')
   const [draft, setDraft] = useState<Settings>({ ...settings })
   const [saving, setSaving] = useState(false)
@@ -37,7 +38,7 @@ export function SettingsPage({ settings, onSave, onBack }: SettingsPageProps) {
     }
     onSave(draft)
     setSaving(false)
-    onBack()
+    navigate('/')
   }
 
   const handleSelectModel = async (provider: string, model: string) => {
@@ -51,7 +52,7 @@ export function SettingsPage({ settings, onSave, onBack }: SettingsPageProps) {
     <div className="settings-page">
       <div className="settings-sidebar">
         <div className="settings-sidebar-header">
-          <button className="settings-back" onClick={onBack}>
+          <button className="settings-back" onClick={() => { navigate('/') }}>
             <span className="settings-back-arrow">←</span>
             <span>返回</span>
           </button>
@@ -196,7 +197,7 @@ export function SettingsPage({ settings, onSave, onBack }: SettingsPageProps) {
         </div>
 
         <div className="settings-footer">
-          <button className="settings-btn" onClick={onBack}>取消</button>
+          <button className="settings-btn" onClick={() => { navigate('/') }}>取消</button>
           <button className="settings-btn primary" disabled={saving} onClick={() => { void handleSave() }}>
             {saving ? '保存中…' : '保存设置'}
           </button>

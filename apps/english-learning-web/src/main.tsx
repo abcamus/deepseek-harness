@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router'
 import { App } from './App'
 import './app.css'
 
@@ -8,6 +9,8 @@ if (el === null) throw new Error('english-learning-web: missing #root')
 
 createRoot(el).render(
   <StrictMode>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </StrictMode>,
 )

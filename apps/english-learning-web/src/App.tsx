@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Routes, Route } from 'react-router'
 import type { Skill, Material, Mission, Settings } from './types'
 import { DEFAULT_SETTINGS } from './types'
 import { useSSE } from './hooks/useSSE'
@@ -37,7 +38,6 @@ export function App() {
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
   const [showUpload, setShowUpload] = useState(false)
   const [showAiFind, setShowAiFind] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
 
   const handleSkillClick = (id: string) => {
@@ -47,32 +47,40 @@ export function App() {
 
   return (
     <div className="app">
-      <TopBar onSettingsClick={() => { setShowSettings(true) }} />
+      <TopBar />
 
-      {showSettings ? (
-        <SettingsPage
-          settings={settings}
-          onSave={setSettings}
-          onBack={() => { setShowSettings(false) }}
-        />
-      ) : (
-        <div className="main">
-          <div className="left">
-            <LevelPath level={12} currentStage={3} totalStages={5} />
-            <div className="skill-grid">
-              {SKILLS.map(s => (
-                <SkillCard key={s.id} skill={s} onClick={handleSkillClick} />
-              ))}
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <div className="main">
+              <div className="left">
+                <LevelPath level={12} currentStage={3} totalStages={5} />
+                <div className="skill-grid">
+                  {SKILLS.map(s => (
+                    <SkillCard key={s.id} skill={s} onClick={handleSkillClick} />
+                  ))}
+                </div>
+              </div>
+              <RightPanel
+                materials={MATERIALS}
+                missions={MISSIONS}
+                skills={SKILLS}
+                onUpload={() => { setShowUpload(true) }}
+              />
             </div>
-          </div>
-          <RightPanel
-            materials={MATERIALS}
-            missions={MISSIONS}
-            skills={SKILLS}
-            onUpload={() => { setShowUpload(true) }}
-          />
-        </div>
-      )}
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <SettingsPage
+              settings={settings}
+              onSave={setSettings}
+            />
+          }
+        />
+      </Routes>
 
       <AIChat messages={messages} status={status} onSend={(text) => { void sendMessage(text) }} />
 
