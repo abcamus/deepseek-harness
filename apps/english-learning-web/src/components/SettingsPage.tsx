@@ -40,7 +40,6 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
     }
     onSave(draft)
     setSaving(false)
-    navigate('/')
   }
 
   const handleSelectModel = async (provider: string, model: string) => {
