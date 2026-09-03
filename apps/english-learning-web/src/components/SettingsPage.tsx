@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import type { Settings, CEFRLevel } from '../types'
 import { useModels } from '../hooks/useModels'
 import { ProviderSettings } from './ProviderSettings'
@@ -22,7 +22,9 @@ const TABS: { id: Tab; icon: string; label: string }[] = [
 
 export function SettingsPage({ settings, onSave }: SettingsPageProps) {
   const navigate = useNavigate()
-  const [tab, setTab] = useState<Tab>('profile')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = (searchParams.get('tab') ?? 'profile') as Tab
+  const setTab = (t: Tab) => { setSearchParams({ tab: t }) }
   const [draft, setDraft] = useState<Settings>({ ...settings })
   const [saving, setSaving] = useState(false)
   const { setActiveModel } = useModels()
