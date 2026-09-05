@@ -1,26 +1,32 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
-import type { Settings, CEFRLevel } from '../types'
+import type { Settings, CEFRLevel, LearnerProfile } from '../types'
+import { saveManualProfile } from '../lib/profile'
 import { useModels } from '../hooks/useModels'
 import { ProviderSettings } from './ProviderSettings'
+import { TrajectoryPanel } from './TrajectoryPanel'
 
 interface SettingsPageProps {
   settings: Settings
+  profile: LearnerProfile | null
   onSave: (s: Settings) => void
+  onProfileSaved: (p: LearnerProfile) => void
+  onRetakeAssessment: () => void
 }
 
 const CEFR_OPTIONS: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const DAILY_GOALS = [15, 30, 45, 60, 90]
 
-type Tab = 'profile' | 'ai' | 'display'
+type Tab = 'profile' | 'ai' | 'display' | 'trajectory'
 
 const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'profile', icon: '👤', label: '个人资料' },
-  { id: 'ai', icon: '🤖', label: 'AI 聊天' },
+  { id: 'ai', icon: '🤖', label: '模型设置' },
   { id: 'display', icon: '🎨', label: '显示设置' },
+  { id: 'trajectory', icon: '📈', label: '轨迹' },
 ]
 
-export function SettingsPage({ settings, onSave }: SettingsPageProps) {
+export function SettingsPage({ settings, profile, onSave, onProfileSaved, onRetakeAssessment }: SettingsPageProps) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = (searchParams.get('tab') ?? 'profile') as Tab
@@ -39,6 +45,14 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
     if (draft.provider.length > 0 && draft.model.length > 0) {
       await setActiveModel(draft.provider, draft.model)
     }
+    // A changed level pick becomes the learner placement record so the agent sees it too.
+    if (draft.currentLevel !== profile?.currentLevel) {
+      try {
+        onProfileSaved(await saveManualProfile(draft.currentLevel))
+      } catch (err) {
+        console.error('failed to save profile:', err)
+      }
+    }
     onSave(draft)
     setSaving(false)
     setSaved(true)
@@ -56,7 +70,7 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
     <div className="settings-page">
       <div className="settings-sidebar">
         <div className="settings-sidebar-header">
-          <button className="settings-back" onClick={() => { navigate('/') }}>
+          <button className="settings-back" onClick={() => { void navigate('/') }}>
             <span className="settings-back-arrow">←</span>
             <span>返回</span>
           </button>
@@ -135,6 +149,25 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
                 </div>
                 <div className="settings-hint">系统会根据你的目标推荐每日学习任务</div>
               </div>
+
+              <div className="settings-group">
+                <label className="settings-label">初始定级测评</label>
+                {profile !== null && (
+                  <div className="settings-hint">
+                    当前水平由{profile.source === 'placement' ? '定级测评' : '手动设置'}评定为 {profile.currentLevel}
+                    {profile.summary === undefined ? '' : `：${profile.summary}`}
+                  </div>
+                )}
+                {profile !== null && profile.skills !== undefined && (
+                  <div className="settings-hint">
+                    分项：听力 {profile.skills.listening ?? '—'} · 口语 {profile.skills.speaking ?? '—'} · 阅读 {profile.skills.reading ?? '—'} · 写作 {profile.skills.writing ?? '—'}
+                  </div>
+                )}
+                <div className="settings-hint">测评通过与 AI 助手对话完成，结果决定资料难度和练习起点</div>
+                <button className="settings-btn" onClick={onRetakeAssessment}>
+                  {profile === null ? '开始定级测评' : '重新测评'}
+                </button>
+              </div>
             </>
           )}
 
@@ -198,10 +231,12 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
               </div>
             </>
           )}
+
+          {tab === 'trajectory' && <TrajectoryPanel />}
         </div>
 
         <div className="settings-footer">
-          <button className="settings-btn" onClick={() => { navigate('/') }}>取消</button>
+          <button className="settings-btn" onClick={() => { void navigate('/') }}>取消</button>
           <button className="settings-btn primary" disabled={saving} onClick={() => { void handleSave() }}>
             {saving ? '保存中…' : '保存设置'}
           </button>

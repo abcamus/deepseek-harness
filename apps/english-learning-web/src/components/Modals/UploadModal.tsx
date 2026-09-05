@@ -1,40 +1,101 @@
+import { useRef, useState } from 'react'
+
 interface UploadModalProps {
   onClose: () => void
+  onAdd: (name: string, content: string) => void
 }
 
-export function UploadModal({ onClose }: UploadModalProps) {
+const UPLOAD_ACCEPT = '.txt,.md,.srt,.vtt,.csv,.json,.html,.htm'
+
+/** Derive a material name from a selected file name by stripping the extension. */
+function nameFromFile(fileName: string): string {
+  const dot = fileName.lastIndexOf('.')
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName
+  return base.trim()
+}
+
+export function UploadModal({ onClose, onAdd }: UploadModalProps) {
+  const [name, setName] = useState('')
+  const [content, setContent] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const readFiles = async (files: FileList | null): Promise<void> => {
+    const file = files?.[0]
+    if (file === undefined) return
+    try {
+      const text = await file.text()
+      setContent(text)
+      setError(null)
+      if (name.trim() === '') setName(nameFromFile(file.name))
+    } catch {
+      setError('无法读取该文件，请换用文本格式（TXT / MD / SRT 等）')
+    }
+  }
+
+  const submit = (): void => {
+    if (name.trim() === '' || content.trim() === '') {
+      setError('请填写资料名称并导入内容')
+      return
+    }
+    onAdd(name.trim(), content)
+    onClose()
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => { e.stopPropagation() }}>
         <div className="modal-header">
-          <div className="modal-title">📁 上传学习资料</div>
+          <div className="modal-title">📁 添加学习资料</div>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
-          <div className="upload-zone">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            style={{ display: 'none' }}
+            onChange={(e) => { void readFiles(e.target.files) }}
+          />
+          <div className="upload-zone" onClick={() => { fileInputRef.current?.click() }}>
             <div className="upload-zone-icon">📁</div>
-            <div className="upload-zone-text">点击或拖拽文件</div>
-            <div className="upload-zone-sub">支持 MP3, MP4, PDF, TXT</div>
+            <div className="upload-zone-text">点击选择文件，或直接在下方粘贴文本</div>
+            <div className="upload-zone-sub">支持 TXT / MD / SRT / VTT 等文本格式</div>
             <div className="upload-formats">
-              <span className="upload-format">MP3</span>
-              <span className="upload-format">MP4</span>
-              <span className="upload-format">PDF</span>
               <span className="upload-format">TXT</span>
+              <span className="upload-format">MD</span>
+              <span className="upload-format">SRT</span>
+              <span className="upload-format">VTT</span>
             </div>
           </div>
           <div className="form-group">
-            <label className="form-label">学习目标</label>
-            <select className="form-input">
-              <option>全面提升</option>
-              <option>听力训练</option>
-              <option>口语练习</option>
-              <option>阅读理解</option>
-            </select>
+            <label className="form-label">资料名称</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="例如：BBC 6min English - Social media"
+              value={name}
+              onChange={(e) => { setName(e.target.value) }}
+            />
           </div>
+          <div className="form-group">
+            <label className="form-label">资料内容</label>
+            <textarea
+              className="form-input"
+              rows={8}
+              placeholder="选择文件后自动导入，或直接粘贴英语文章 / 字幕 / 转录文本…"
+              value={content}
+              onChange={(e) => { setContent(e.target.value) }}
+              style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+            />
+          </div>
+          {error !== null && (
+            <div style={{ fontSize: 12, color: 'var(--bad, #e05252)', marginTop: 8 }}>{error}</div>
+          )}
         </div>
         <div className="modal-footer">
           <button className="modal-btn" onClick={onClose}>取消</button>
-          <button className="modal-btn pr" onClick={onClose}>开始分析</button>
+          <button className="modal-btn pr" onClick={submit}>添加资料</button>
         </div>
       </div>
     </div>

@@ -168,6 +168,21 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       resolved = resolveBoot(web, 'web', options, args)
     })
 
+  const hello = program.command('hello').description('boot the hello profile (alias of --profile hello); the hello app\'s own flags follow')
+  hello
+    .helpOption(false)
+    .allowUnknownOption()
+    .passThroughOptions()
+    .enablePositionalOptions()
+    .argument('[args...]', 'arguments for the hello app (see: dsh hello --help)')
+    .option('--patch <path>', 'extra patch-list overlay applied after the profile layer (repeatable)', collect)
+    .option('--dump-config', 'print the composed hello-profile tree (with the user layer and any --patch) and exit')
+    .option('--dump-default-config', 'print the hello profile\'s bundle layers (no user layer) and exit')
+    .action((args: string[], options: BootOptions) => {
+      rejectParentOptions('hello')
+      resolved = resolveBoot(hello, 'hello', options, args)
+    })
+
   const plugin = program.command('plugin').description('manage a profile\'s plugins by forwarding the remaining arguments to pnpm in the profile directory')
   plugin
     .requiredOption('--profile <name>', 'the profile whose plugins to manage (initialized on first use)')

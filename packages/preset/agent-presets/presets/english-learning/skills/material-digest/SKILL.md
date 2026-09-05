@@ -12,15 +12,11 @@ whenToUse: 用户上传学习资料、粘贴文本、或请求分析内容时
 
 当用户提供学习资料时，按以下步骤处理：
 
-### 第一步：解析内容
+### 第一步：获取内容
 
-1. 识别资料类型：
-   - 文章/文档
-   - 视频字幕/转录
-   - 音频转录
-   - 其他文本
-
-2. 使用 `parse_material` 工具提取主要文本内容
+资料以两种方式提供：
+- 文件路径：消息中给出资料文件路径（通常是 `.english-learning/materials/` 下的文件）时，使用 `read` 工具读取全文
+- 直接粘贴：文本直接出现在消息中
 
 ### 第二步：分析难度
 
@@ -30,7 +26,7 @@ whenToUse: 用户上传学习资料、粘贴文本、或请求分析内容时
 
 ### 第三步：提取知识
 
-使用 `knowledge_extractor` 工具提取：
+使用 `skill` 工具加载 `knowledge-extractor` 技能，按其规则提取：
 - 核心词汇（5-10个）
 - 语法点
 - 核心概念/主题
@@ -41,6 +37,44 @@ whenToUse: 用户上传学习资料、粘贴文本、或请求分析内容时
 1. 内容主旨（1-2句）
 2. 关键信息
 3. 学习重点
+
+### 第五步：记录学习进度
+
+分析完成后，使用 `write` 工具把一份学习记录写入：
+`.english-learning/progress/<当前毫秒时间戳>-digest.json`
+
+文件内容为 JSON：
+```json
+{
+  "time": 1788567736316,
+  "kind": "digest",
+  "skill": "reading",
+  "material": "资料标题",
+  "level": "B2",
+  "vocabulary": 6
+}
+```
+
+字段说明：`time` 为当前毫秒时间戳（数字）；`level` 填第二步评估的 CEFR 难度；`vocabulary` 填提取的词汇数量（数字）。
+
+### 第六步：沉淀词汇本
+
+把本次提取的核心词汇用 `write` 工具写入词汇本：
+`.english-learning/vocabulary/<当前毫秒时间戳>-<资料名英文简称>.json`
+
+文件内容为 JSON：
+```json
+{
+  "time": 1788567736316,
+  "material": "资料标题",
+  "level": "B2",
+  "words": [
+    { "word": "vulnerability", "definition": "脆弱性，易损性", "example": "Vulnerability is not weakness." }
+  ]
+}
+```
+
+字段说明：`time` 为当前毫秒时间戳（数字）；`words` 为第三步提取的全部词汇（word / definition / example 三项）。后续复习训练会从这里取词。
 
 ## 输出格式
 

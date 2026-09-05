@@ -19,7 +19,11 @@
   ],
   "dsh": {
     "configTrees": [
-      { "mount": "config/agent-presets", "path": "../../packages/preset/agent-presets/presets", "scanRoster": true }
+      {
+        "mount": "config/agent-presets",
+        "path": "../../packages/preset/agent-presets/presets",
+        "scanRoster": true
+      }
     ]
   },
   "license": "MIT",
@@ -44,7 +48,9 @@
     "@deepseek-ai/dsh-cmdline": "workspace:^",
     "@deepseek-ai/dsh-launch-environment": "workspace:^",
     "@deepseek-ai/dsh-fs-local": "workspace:^",
+    "@deepseek-ai/dsh-hello": "workspace:^",
     "@deepseek-ai/dsh-headless": "workspace:^",
+    "@deepseek-ai/dsh-english-learning": "workspace:^",
     "@deepseek-ai/dsh-mcp-client": "workspace:^",
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-hooks-claude-code": "workspace:^",

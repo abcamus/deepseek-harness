@@ -50,11 +50,9 @@
   name: '@deepseek-ai/dsh-tool-skill'
   inject: [tools, skills]
 
-# Note: The following tools are referenced in skills but don't exist as separate packages:
-# - tool-material (parse_material)
-# - tool-vocabulary (add_vocabulary, search_vocabulary)
-# - tool-exercise (generate_listening, generate_speaking, etc.)
-# These would need to be implemented as separate tool packages or provided by a bundle.
+# Note: the skills rely on the stock tool set only: `read` for material files and
+# `web_search` for finding materials. The dashboard bundle (dsh-english-learning)
+# registers this preset's skills/ directory as an extra skill root at runtime.
 
 # Config for the preset
 config:

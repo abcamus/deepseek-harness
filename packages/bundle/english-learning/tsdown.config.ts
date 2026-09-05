@@ -9,4 +9,28 @@ export default defineConfig({
   fixedExtension: false,
   dts: false,
   clean: false,
+  // Exclude packages that use TC39 decorators from bundling
+  deps: {
+    neverBundle: (specifier) =>
+      specifier.startsWith('@deepseek-ai/dsh-typert-protocol') ||
+      specifier.startsWith('@deepseek-ai/dsh-llm') ||
+      specifier.startsWith('@deepseek-ai/dsh-session') ||
+      specifier.startsWith('@deepseek-ai/dsh-settings') ||
+      specifier.startsWith('@deepseek-ai/dsh-agent') ||
+      specifier.startsWith('@deepseek-ai/dsh-agent-default-model') ||
+      specifier.startsWith('@deepseek-ai/dsh-host-webserver') ||
+      specifier.startsWith('@deepseek-ai/dsh-api-') ||
+      specifier.startsWith('@deepseek-ai/dsh-workspace'),
+  },
+  // Transpile TC39 decorators to legacy syntax for Node.js compatibility
+  esbuild: {
+    target: 'es2024',
+    loader: 'ts',
+    tsconfigRaw: JSON.stringify({
+      compilerOptions: {
+        experimentalDecorators: true,
+        emitDecoratorMetadata: false,
+      },
+    }),
+  },
 })

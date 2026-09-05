@@ -2,6 +2,9 @@ CLAUDE.local.md
 .env
 node_modules/
 lib/
+# English-learning web keeps client sources in src/lib/; the bare `lib/` above
+# is for built package output and must not swallow them.
+!apps/english-learning-web/src/lib/
 *.tsbuildinfo
 pnpm-debug.log
 .pnpm-store/
@@ -9,6 +12,7 @@ pnpm-debug.log
 examples/*/*.jsonl
 .storages/
 .sessions/
+.english-learning/
 examples/*/.sessions/
 coverage/
 .doc-typecheck-*/
@@ -39,3 +43,6 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+.opencode
+*.jpg
+apps/english-learning-web/dist/**

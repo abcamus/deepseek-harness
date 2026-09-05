@@ -16,6 +16,13 @@ export function AIChat({ messages, status, onSend }: AIChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Programmatic sends (assessment start, material analysis, practice) arrive while the
+  // panel is collapsed; open it whenever a user message lands.
+  useEffect(() => {
+    const last = messages[messages.length - 1]
+    if (last !== undefined && last.role === 'user') setOpen(true)
+  }, [messages])
+
   const handleSubmit = () => {
     if (input.trim() === '' || status !== 'connected') return
     void onSend(input.trim())

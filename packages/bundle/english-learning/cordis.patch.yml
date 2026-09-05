@@ -1,8 +1,16 @@
 # English Learning Agent Bundle Patch
 # Provides core agent + web search + skill system for English learning
 # Use with the english-learning preset for skills (material-digest, knowledge-extractor, exercise-generator, material-search)
+#
+# The base layer (cordis:include) already provides: typert, typert-loader, gateway,
+# llm, agent, session, session-projection, session-query-sqlite, attachment-local,
+# workspace, settings-file, credentials-local, subprocess-local, sandbox-local, tools, etc.
+# This patch only adds what's unique to the english-learning web profile.
 
 - insert:
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
     # Web CLI flags parser (--host, --port, --no-open)
     - id: web-startup
       name: '@deepseek-ai/dsh-web-app/startup'
@@ -15,6 +23,26 @@
         host: !!js ctx.webStartup.host ?? '127.0.0.1'
         port: !!js ctx.webStartup.port ?? 4000
 
+    # DSH connection (HTTP RPC transport)
+    - id: connection
+      name: '@deepseek-ai/dsh-client-connection'
+      config:
+        trustedHosts: []
+
+    # API remotes (provides remote session/commands/subagents)
+    - id: api-remotes
+      name: '@deepseek-ai/dsh-api-remotes'
+
+    # Workspace registry
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+
+    # Session controller (provides session.list and other session RPCs)
+    - id: session-controller
+      name: '@deepseek-ai/dsh-api-session-controller'
+      config:
+        nativeOpen: false
+
     # Bundle plugin (logs load message)
     - id: english-learning
       name: '@deepseek-ai/dsh-english-learning'
@@ -23,151 +51,10 @@
     - id: code-runtime
       name: '@deepseek-ai/dsh-code-runtime-worker-thread'
 
-    # Core LLM
-    - id: llm
-      name: '@deepseek-ai/dsh-llm'
-
-    - id: deepseek-llm-api-extensions
-      name: '@deepseek-ai/dsh-deepseek-llm-api-extensions'
-
-    - id: llm-deepseek
-      name: '@deepseek-ai/dsh-llm-deepseek'
-
-    # User-settings document ($DSH_HOME/settings.yaml, hot-reloaded)
-    - id: settings
-      name: '@deepseek-ai/dsh-settings-file'
-
-    # Credential sources: env > $DSH_HOME/.credentials.yaml > .env
-    - id: credentials
-      name: '@deepseek-ai/dsh-credentials-local'
-
-    # Pi-ai multi-provider adapter (reads llm-pi-ai: section from settings)
-    - id: llm-pi-ai
-      name: '@deepseek-ai/dsh-llm-pi-ai'
-      config:
-        providers:
-          opencode:
-            apiKeyEnv: OPENCODE_API_KEY
-            customUserAgent: "opencode/1.18.0"
-            headers:
-              x-opencode-client: "cli"
-
-    # Core session/agent
-    - id: session
-      name: '@deepseek-ai/dsh-session'
-
-    - id: session-log-deepseek
-      name: '@deepseek-ai/dsh-session-log-deepseek'
-
-    - id: agent
-      name: '@deepseek-ai/dsh-agent'
-
-    - id: agent-default-model
-      name: '@deepseek-ai/dsh-agent-default-model'
-      config:
-        provider: opencode
-        model: nemotron-3-ultra-free
-
-    - id: agent-loop
-      name: '@deepseek-ai/dsh-agent-loop'
-      config:
-        agents: []
-
-    - id: agent-instructions
-      name: '@deepseek-ai/dsh-agent-instructions'
-      config:
-        maxBytes: 65536
-
-    - id: system-prompt
-      name: '@deepseek-ai/dsh-system-prompt'
-      config:
-        persona: ''
-
-    - id: tools
-      name: '@deepseek-ai/dsh-tools'
-
-    # Subprocess for shell tools
-    - id: subprocess
-      name: '@deepseek-ai/dsh-subprocess-local'
-
-    # Sandbox for filesystem tools
-    - id: sandbox
-      name: '@deepseek-ai/dsh-sandbox-local'
-
-    - id: sandbox-policy
-      name: '@deepseek-ai/dsh-sandbox-policy'
-      config:
-        mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
-        workspaceRoot: !!js process.cwd()
-
-    - id: fs-observation-policy
-      name: '@deepseek-ai/dsh-fs-observation-policy'
-
-    - id: fs-sandbox
-      name: '@deepseek-ai/dsh-fs-sandbox'
-
-    - id: tool-fs
-      name: '@deepseek-ai/dsh-tool-fs'
-
-    - id: tool-fs-search
-      name: '@deepseek-ai/dsh-tool-fs-search'
-      config:
-        sampleOverCapGlobResults: false
-
-    # Web capability (DeepSeek search + HTTP fetch)
-    - id: web
-      name: '@deepseek-ai/dsh-web'
-      config:
-        searchProvider: deepseek-official
-        fetchProvider: http
-
-    - id: web-search-deepseek
-      name: '@deepseek-ai/dsh-web-search-deepseek'
-      config:
-        apiKeyEnv: DEEPSEEK_API_KEY
-
-    - id: web-fetch-http
-      name: '@deepseek-ai/dsh-web-fetch-http'
-
-    - id: tool-web
-      name: '@deepseek-ai/dsh-tool-web'
-      inject: [tools, web]
-      config:
-        fetch: true
-        searchTimeoutMs: 60000
-
-    # Xiaohongshu video extraction
-    - id: web-fetch-xiaohongshu
-      name: '@deepseek-ai/dsh-web-fetch-xiaohongshu'
-      inject: [tools, web]
-
-    # Skill system
-    - id: skill
-      name: '@deepseek-ai/dsh-skill'
-
-    - id: skill-filesystem
-      name: '@deepseek-ai/dsh-skill-filesystem'
-      inject: [skills]
-
-    - id: tool-skill
-      name: '@deepseek-ai/dsh-tool-skill'
-      inject: [tools, skills]
-
-    # Compaction (for long learning sessions)
-    - id: token-meter
-      name: '@deepseek-ai/dsh-token-meter'
-
-    - id: compaction-basic
-      name: '@deepseek-ai/dsh-compaction-basic'
-
-    # Todo tool (for tracking learning progress)
-    - id: tool-todo
-      name: '@deepseek-ai/dsh-tool-todo'
-      config:
-        allowParallelInProgress: true
-
-    # Note: The following English learning tools are NOT yet implemented:
-    # - tool-material (parse_material)
-    # - tool-vocabulary (add_vocabulary, search_vocabulary)
-    # - tool-exercise (generate_listening, generate_speaking, etc.)
-    # These need to be created as separate tool packages and added here.
+# Enable web_fetch so material-search can pull article and transcript text directly.
+# A non-insert patch replaces the row's config, so repeat the base row's values here.
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+    searchTimeoutMs: 60000

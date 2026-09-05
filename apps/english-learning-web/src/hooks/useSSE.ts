@@ -77,11 +77,16 @@ export function useSSE() {
     setMessages(prev => [...prev, { id: `user-${Date.now()}`, role: 'user', text }])
 
     try {
-      await fetch('/api/chat', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: text }),
       })
+      if (!response.ok) {
+        const data = await response.json().catch(() => undefined) as { error?: string } | undefined
+        const reason = data?.error ?? `HTTP ${String(response.status)}`
+        setMessages(prev => [...prev, { id: `error-${Date.now()}`, role: 'assistant', text: `⚠️ 发送失败：${reason}` }])
+      }
     } catch (err) {
       console.error('send failed:', err)
     }

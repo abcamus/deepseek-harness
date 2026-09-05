@@ -143,8 +143,23 @@ export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
     bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
     patchReload: 'live',
   },
+
+  // 建立自定义bundle:dsh-my-app
+  'my-app': {
+    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-my-app'],
+    patchReload: 'live',
+  },
+
   headless: {
     bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'],
+    patchReload: 'startup',
+  },
+  hello: {
+    bundles: ['@deepseek-ai/dsh-hello'],
+    patchReload: 'startup',
+  },
+  'english-learning': {
+    bundles: ['@deepseek-ai/dsh-english-learning'],
     patchReload: 'startup',
   },
   sdk: {

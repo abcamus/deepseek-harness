@@ -1,25 +1,46 @@
 import { useState } from 'react'
-import type { Material, Mission, Skill } from '../types'
+import type { Material, Mission, Skill, VocabularyGroup } from '../types'
 import { MaterialsTab } from './MaterialsTab'
 import { MissionsTab } from './MissionsTab'
 import { ProgressTab } from './ProgressTab'
+import { VocabularyTab } from './VocabularyTab'
 
 interface RightPanelProps {
   materials: Material[]
   missions: Mission[]
   skills: Skill[]
+  streakDays: number
+  vocabulary: VocabularyGroup[]
   onUpload: () => void
+  onAiFind: () => void
+  onDeleteMaterial: (id: string) => void
+  onAnalyzeMaterial: (id: string) => void
+  onPracticeMaterial: (id: string) => void
+  onReviewVocabulary: () => void
 }
 
-type TabId = 'materials' | 'missions' | 'progress'
+type TabId = 'materials' | 'vocabulary' | 'missions' | 'progress'
 
 const TABS: { id: TabId; icon: string; label: string }[] = [
   { id: 'materials', icon: '📚', label: '资料' },
+  { id: 'vocabulary', icon: '🔤', label: '词汇' },
   { id: 'missions', icon: '🎯', label: '任务' },
   { id: 'progress', icon: '📈', label: '进度' },
 ]
 
-export function RightPanel({ materials, missions, skills, onUpload }: RightPanelProps) {
+export function RightPanel({
+  materials,
+  missions,
+  skills,
+  streakDays,
+  vocabulary,
+  onUpload,
+  onAiFind,
+  onDeleteMaterial,
+  onAnalyzeMaterial,
+  onPracticeMaterial,
+  onReviewVocabulary,
+}: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('materials')
 
   return (
@@ -38,9 +59,19 @@ export function RightPanel({ materials, missions, skills, onUpload }: RightPanel
       </div>
 
       <div className="right-sc">
-        {activeTab === 'materials' && <MaterialsTab materials={materials} onUpload={onUpload} />}
+        {activeTab === 'materials' && (
+          <MaterialsTab
+            materials={materials}
+            onUpload={onUpload}
+            onAiFind={onAiFind}
+            onDelete={onDeleteMaterial}
+            onAnalyze={onAnalyzeMaterial}
+            onPractice={onPracticeMaterial}
+          />
+        )}
+        {activeTab === 'vocabulary' && <VocabularyTab groups={vocabulary} onReview={onReviewVocabulary} />}
         {activeTab === 'missions' && <MissionsTab missions={missions} />}
-        {activeTab === 'progress' && <ProgressTab skills={skills} />}
+        {activeTab === 'progress' && <ProgressTab skills={skills} streakDays={streakDays} />}
       </div>
     </div>
   )

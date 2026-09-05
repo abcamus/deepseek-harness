@@ -9,8 +9,8 @@
  * - Compaction for long sessions
  * - Web dashboard with LLM chat interface
  *
- * English learning skills (material-digest, knowledge-extractor, exercise-generator, material-search)
- * are loaded from the preset's skills/ directory via skill-filesystem.
+ * English learning skills (material-digest, knowledge-extractor, exercise-generator, material-search,
+ * placement-assessment) are loaded from the preset's skills/ directory via skill-filesystem.
  *
  * @module @deepseek-ai/dsh-english-learning
  */
@@ -18,12 +18,13 @@
 import { exec } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { FileSystemSkillProvider, type Config as FileSystemSkillConfig } from '@deepseek-ai/dsh-skill-filesystem'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
@@ -68,6 +69,260 @@ function resolveDistIndex(): string {
     dirname(require.resolve('@deepseek-ai/dsh-english-learning-web/package.json')),
     'dist', 'index.html',
   )
+}
+
+/** Resolve the absolute path to the english-learning preset's bundled skills. */
+function resolvePresetSkillsDir(): string {
+  const require = createRequire(import.meta.url)
+  return join(
+    dirname(require.resolve('@deepseek-ai/dsh-agent-presets/package.json')),
+    'presets', 'english-learning', 'skills',
+  )
+}
+
+/** Directory under the launch workspace where learning materials are stored as Markdown files. */
+const MATERIALS_DIR = join(process.cwd(), '.english-learning', 'materials')
+
+/** Directory under the launch workspace where the agent writes one learning record per JSON file. */
+const PROGRESS_DIR = join(process.cwd(), '.english-learning', 'progress')
+
+/** Directory under the launch workspace where digested vocabulary is banked, one file per material. */
+const VOCABULARY_DIR = join(process.cwd(), '.english-learning', 'vocabulary')
+
+/** Learner placement record under the launch workspace: agent-written during an assessment, dashboard-written for a manual level pick. */
+const PROFILE_PATH = join(process.cwd(), '.english-learning', 'profile.json')
+
+/** One learning material registered by the dashboard. */
+interface MaterialEntry {
+  id: string
+  name: string
+  path: string
+  bytes: number
+  updatedAt: number
+}
+
+/** One learning activity record written by the agent's skills. */
+interface ProgressRecord {
+  time: number
+  kind: 'digest' | 'exercise'
+  skill: 'listening' | 'speaking' | 'reading' | 'writing'
+  material?: string
+  level?: string
+  vocabulary?: number
+  count?: number
+  correct?: number
+}
+
+/** One vocabulary bank entry: the words extracted from one material. */
+interface VocabularyEntry {
+  time: number
+  material?: string
+  level?: string
+  words: Array<{ word: string; definition: string; example?: string }>
+}
+
+/** Learner placement record: the assessed (source placement) or manually picked (source manual) CEFR level. */
+interface LearnerProfile {
+  time: number
+  kind: 'placement'
+  source: 'placement' | 'manual'
+  currentLevel: string
+  skills?: Partial<Record<(typeof ABILITY_IDS)[number], string>>
+  weakSkills?: Array<(typeof ABILITY_IDS)[number]>
+  summary?: string
+}
+
+const ABILITY_IDS = ['listening', 'speaking', 'reading', 'writing'] as const
+
+/** Valid CEFR levels for a placement record. */
+const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] as const
+
+/** XP awarded per learning record kind. */
+const XP_PER_DIGEST = 40
+const XP_PER_EXERCISE = 20
+const XP_PER_VOCABULARY_WORD = 5
+
+/** Parse one progress file; returns undefined for malformed or non-conforming content. */
+function parseProgressRecord(content: string): ProgressRecord | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const record = parsed as Record<string, unknown>
+  if (typeof record.time !== 'number' || !Number.isFinite(record.time)) return undefined
+  if (record.kind !== 'digest' && record.kind !== 'exercise') return undefined
+  if (typeof record.skill !== 'string' || !(ABILITY_IDS as readonly string[]).includes(record.skill)) return undefined
+  const entry: Record<string, unknown> = { time: record.time, kind: record.kind, skill: record.skill }
+  if (typeof record.material === 'string') entry.material = record.material
+  if (typeof record.level === 'string') entry.level = record.level
+  if (typeof record.vocabulary === 'number') entry.vocabulary = record.vocabulary
+  if (typeof record.count === 'number') entry.count = record.count
+  if (typeof record.correct === 'number') entry.correct = record.correct
+  return entry as unknown as ProgressRecord
+}
+
+/** Read every agent-written progress record sorted oldest first; unreadable files are skipped. */
+async function readProgressRecords(): Promise<ProgressRecord[]> {
+  let names: string[]
+  try {
+    names = await readdir(PROGRESS_DIR)
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ENOENT') return []
+    throw error
+  }
+  const records: ProgressRecord[] = []
+  for (const fileName of names) {
+    if (!fileName.endsWith('.json')) continue
+    const content = await readFile(join(PROGRESS_DIR, fileName), 'utf8').catch(() => undefined)
+    if (content === undefined) continue
+    const record = parseProgressRecord(content)
+    if (record !== undefined) records.push(record)
+  }
+  return records.sort((a, b) => a.time - b.time)
+}
+
+/** Read every vocabulary bank file sorted newest first; unreadable files are skipped. */
+async function readVocabularyEntries(): Promise<VocabularyEntry[]> {
+  let names: string[]
+  try {
+    names = await readdir(VOCABULARY_DIR)
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ENOENT') return []
+    throw error
+  }
+  const entries: VocabularyEntry[] = []
+  for (const fileName of names) {
+    if (!fileName.endsWith('.json')) continue
+    const content = await readFile(join(VOCABULARY_DIR, fileName), 'utf8').catch(() => undefined)
+    if (content === undefined) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(content)
+    } catch {
+      continue
+    }
+    if (typeof parsed !== 'object' || parsed === null) continue
+    const record = parsed as Record<string, unknown>
+    if (!Array.isArray(record.words)) continue
+    const words = record.words.filter((word): word is { word: string; definition: string; example?: string } => {
+      if (typeof word !== 'object' || word === null) return false
+      const candidate = word as Record<string, unknown>
+      return typeof candidate.word === 'string' && typeof candidate.definition === 'string'
+    }).map(word => ({
+      word: word.word,
+      definition: word.definition,
+      ...(typeof word.example === 'string' ? { example: word.example } : {}),
+    }))
+    if (words.length === 0) continue
+    entries.push({
+      time: typeof record.time === 'number' ? record.time : 0,
+      ...(typeof record.material === 'string' ? { material: record.material } : {}),
+      ...(typeof record.level === 'string' ? { level: record.level } : {}),
+      words,
+    })
+  }
+  return entries.sort((a, b) => b.time - a.time)
+}
+
+/** Parse the placement file; returns undefined for malformed or non-conforming content. */
+function parseLearnerProfile(content: string): LearnerProfile | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const record = parsed as Record<string, unknown>
+  if (typeof record.time !== 'number' || !Number.isFinite(record.time)) return undefined
+  if (record.kind !== 'placement') return undefined
+  if (record.source !== 'placement' && record.source !== 'manual') return undefined
+  if (typeof record.currentLevel !== 'string' || !(CEFR_LEVELS as readonly string[]).includes(record.currentLevel)) return undefined
+  const profile: Record<string, unknown> = {
+    time: record.time,
+    kind: record.kind,
+    source: record.source,
+    currentLevel: record.currentLevel,
+  }
+  if (typeof record.summary === 'string') profile.summary = record.summary
+  if (Array.isArray(record.weakSkills)) {
+    const weak = record.weakSkills.filter((skill): skill is (typeof ABILITY_IDS)[number] =>
+      typeof skill === 'string' && (ABILITY_IDS as readonly string[]).includes(skill))
+    if (weak.length > 0) profile.weakSkills = weak
+  }
+  if (typeof record.skills === 'object' && record.skills !== null) {
+    const levels = record.skills as Record<string, unknown>
+    const perSkill: Partial<Record<(typeof ABILITY_IDS)[number], string>> = {}
+    for (const id of ABILITY_IDS) {
+      const level = levels[id]
+      if (typeof level === 'string' && (CEFR_LEVELS as readonly string[]).includes(level)) perSkill[id] = level
+    }
+    if (Object.keys(perSkill).length > 0) profile.skills = perSkill
+  }
+  return profile as unknown as LearnerProfile
+}
+
+/** Read the learner placement record; a missing or malformed file reads as no profile. */
+async function readLearnerProfile(): Promise<LearnerProfile | undefined> {
+  const content = await readFile(PROFILE_PATH, 'utf8').catch(() => undefined)
+  if (content === undefined) return undefined
+  return parseLearnerProfile(content)
+}
+
+/** Count consecutive learning days ending today (or yesterday when today has no record yet). */
+function countStreakDays(records: readonly ProgressRecord[]): number {
+  if (records.length === 0) return 0
+  const dayKey = (time: number): string => {
+    const date = new Date(time)
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  }
+  const days = new Set(records.map(record => dayKey(record.time)))
+  const cursor = new Date()
+  let streak = 0
+  if (!days.has(dayKey(cursor.getTime()))) cursor.setDate(cursor.getDate() - 1)
+  while (days.has(dayKey(cursor.getTime()))) {
+    streak += 1
+    cursor.setDate(cursor.getDate() - 1)
+  }
+  return streak
+}
+
+/** Strip filesystem-hostile characters and bound the length of a user-supplied material name. */
+function sanitizeMaterialName(name: string): string {
+  const cleaned = name.replace(/[/\\:*?"<>|\u0000-\u001f]/g, '').trim()
+  const bounded = cleaned.length > 0 ? cleaned.slice(0, 60) : 'material'
+  return bounded
+}
+
+/** Read the materials directory into entries; a missing directory lists as empty. */
+async function listMaterials(): Promise<MaterialEntry[]> {
+  let names: string[]
+  try {
+    names = await readdir(MATERIALS_DIR)
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ENOENT') return []
+    throw error
+  }
+  const entries: MaterialEntry[] = []
+  for (const fileName of names) {
+    if (!fileName.endsWith('.md')) continue
+    const path = join(MATERIALS_DIR, fileName)
+    const info = await stat(path).then(
+      info => ({ bytes: info.size, updatedAt: info.mtimeMs }),
+      () => undefined,
+    )
+    if (info === undefined) continue
+    entries.push({
+      id: fileName.replace(/\.md$/, ''),
+      name: fileName.replace(/\.md$/, '').replace(/^\d+-/, ''),
+      path,
+      ...info,
+    })
+  }
+  return entries.sort((a, b) => b.id.localeCompare(a.id))
 }
 
 /** MIME types for static assets. */
@@ -120,6 +375,23 @@ export function apply(ctx: Context): void {
   // Resolve the dist directory at load time
   const distIndex = resolveDistIndex()
   const distRoot = dirname(distIndex)
+
+  // Register the preset's skills (material-digest, knowledge-extractor, exercise-generator,
+  // material-search) as an extra skill root so chat agents see them in the catalog.
+  let presetSkillProvider: FileSystemSkillProvider | undefined
+  const presetSkillConfig: FileSystemSkillConfig = {
+    providerName: 'english-learning',
+    includeDefaultRoots: false,
+    customSkillDirs: [resolvePresetSkillsDir()],
+    watch: false,
+  }
+  ctx.skills.registerProvider((control) => {
+    presetSkillProvider = new FileSystemSkillProvider(ctx, control, presetSkillConfig)
+    return presetSkillProvider
+  })
+  ctx.effect(function* () {
+    yield async () => { await presetSkillProvider?.dispose() }
+  }, 'english-learning: preset skills provider')
 
   // Persistent agent for the chat session
   let chatAgent: ChatAgent | undefined
@@ -360,6 +632,189 @@ export function apply(ctx: Context): void {
     },
   }), 'english-learning: SSE endpoint')
 
+  // Progress endpoint: aggregates the agent-written learning records into per-ability
+  // activity counts, XP, streak days, and the latest records for the dashboard.
+  const webServerForProgress = ctx.webServer
+  ctx.effect(() => webServerForProgress.register({
+    kind: 'exact',
+    path: '/api/progress',
+    handler: async (_req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const records = await readProgressRecords()
+        const skills = Object.fromEntries(ABILITY_IDS.map(id => [id, {
+          exercises: 0, digests: 0, vocabulary: 0, activities: 0, correct: 0, answered: 0,
+        }])) as Record<(typeof ABILITY_IDS)[number], {
+          exercises: number
+          digests: number
+          vocabulary: number
+          activities: number
+          correct: number
+          answered: number
+        }>
+        let digests = 0
+        let exercises = 0
+        let vocabulary = 0
+        for (const record of records) {
+          const stat = skills[record.skill]
+          stat.activities += 1
+          if (record.kind === 'digest') {
+            digests += 1
+            stat.digests += 1
+            if (typeof record.vocabulary === 'number') {
+              vocabulary += record.vocabulary
+              stat.vocabulary += record.vocabulary
+            }
+          } else {
+            exercises += 1
+            stat.exercises += 1
+            if (typeof record.correct === 'number' && typeof record.count === 'number' && record.count > 0) {
+              stat.correct += record.correct
+              stat.answered += record.count
+            }
+          }
+        }
+        const xp = digests * XP_PER_DIGEST + exercises * XP_PER_EXERCISE + vocabulary * XP_PER_VOCABULARY_WORD
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({
+          skills,
+          totals: { digests, exercises, vocabulary },
+          xp,
+          streakDays: countStreakDays(records),
+          recent: records.slice(-8).reverse(),
+        }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: progress error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: progress endpoint')
+
+  // Vocabulary endpoint: the bank of extracted words, newest material first.
+  const webServerForVocabulary = ctx.webServer
+  ctx.effect(() => webServerForVocabulary.register({
+    kind: 'exact',
+    path: '/api/vocabulary',
+    handler: async (_req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const entries = await readVocabularyEntries()
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ entries }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: vocabulary error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: vocabulary endpoint')
+
+  // Profile endpoint: GET reads the learner placement record, POST records a manual level pick.
+  const webServerForProfile = ctx.webServer
+  ctx.effect(() => webServerForProfile.register({
+    kind: 'exact',
+    path: '/api/profile',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method === 'GET') {
+          const profile = await readLearnerProfile()
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ profile: profile ?? null }))
+          return
+        }
+        if (req.method === 'POST') {
+          const body = JSON.parse(await readBody(req)) as { currentLevel?: string }
+          if (typeof body.currentLevel !== 'string' || !(CEFR_LEVELS as readonly string[]).includes(body.currentLevel)) {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Missing or invalid currentLevel' }))
+            return
+          }
+          const profile: LearnerProfile = {
+            time: Date.now(),
+            kind: 'placement',
+            source: 'manual',
+            currentLevel: body.currentLevel,
+          }
+          await mkdir(dirname(PROFILE_PATH), { recursive: true })
+          await writeFile(PROFILE_PATH, `${JSON.stringify(profile, null, 2)}\n`, 'utf8')
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, profile }))
+          return
+        }
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: profile error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: profile endpoint')
+
+  // Materials endpoints: GET lists, POST adds, DELETE removes. Materials are Markdown
+  // files under the launch workspace so chat agents can read them with the read tool.
+  const webServerForMaterials = ctx.webServer
+  ctx.effect(() => webServerForMaterials.register({
+    kind: 'exact',
+    path: '/api/materials',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method === 'GET') {
+          const materials = await listMaterials()
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ materials }))
+          return
+        }
+        if (req.method === 'POST') {
+          const body = JSON.parse(await readBody(req)) as { name?: string; content?: string }
+          if (typeof body.name !== 'string' || body.name.trim() === ''
+            || typeof body.content !== 'string' || body.content.trim() === '') {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Missing name or content' }))
+            return
+          }
+          await mkdir(MATERIALS_DIR, { recursive: true })
+          const id = `${String(Date.now())}-${sanitizeMaterialName(body.name)}`
+          const path = join(MATERIALS_DIR, `${id}.md`)
+          await writeFile(path, body.content, 'utf8')
+          const info = await stat(path)
+          const entry: MaterialEntry = {
+            id,
+            name: sanitizeMaterialName(body.name),
+            path,
+            bytes: info.size,
+            updatedAt: info.mtimeMs,
+          }
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, material: entry }))
+          return
+        }
+        if (req.method === 'DELETE') {
+          const body = JSON.parse(await readBody(req)) as { id?: string }
+          if (typeof body.id !== 'string' || body.id === ''
+            || body.id.includes('/') || body.id.includes('\\') || body.id.includes('..')) {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Missing or invalid id' }))
+            return
+          }
+          await unlink(join(MATERIALS_DIR, `${body.id}.md`))
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true }))
+          return
+        }
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: materials error: ${reason}`)
+        res.writeHead((error as { code?: string }).code === 'ENOENT' ? 404 : 500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: materials endpoint')
+
   // Chat endpoint: receives a user message and forwards to the agent
   const webServerForChat = ctx.webServer
   ctx.effect(() => webServerForChat.register({
@@ -575,24 +1030,38 @@ export function apply(ctx: Context): void {
       res.end()
       return
     }
+
     const pathname = new URL(req.url ?? '/', 'http://x').pathname
+
+    // Handle DSH authentication flow for the root path only
+    // The connection plugin requires browser cookie authentication
+    if (pathname === '/' || pathname === '') {
+      const connection = ctx.get('connection') as { authorizeIndex?: (req: IncomingMessage, res: ServerResponse) => boolean } | undefined
+      if (connection?.authorizeIndex !== undefined) {
+        const authorized = connection.authorizeIndex(req, res)
+        if (!authorized) return
+      }
+    }
+
     await serveStatic(pathname, res)
   }), 'english-learning: fallback seat')
 
   // After the Loader settles, print the URL and open the browser
   let announced = false
-  ctx.inject(['webServer'], (wsCtx) => {
+  ctx.inject(['webServer', 'connection'], (wsCtx) => {
     const announce = (): void => {
       if (announced) return
       announced = true
       const ws = wsCtx.webServer as { port: number }
       const port = ws.port
       const webUrl = `http://127.0.0.1:${String(port)}`
-      console.log(`dsh english-learning: ${webUrl}`)
+      const connection = ctx.get('connection') as { authenticatedUrl?: (url: string) => string } | undefined
+      const authenticatedUrl = connection?.authenticatedUrl(webUrl) ?? webUrl
+      console.log(`dsh english-learning: ${authenticatedUrl}`)
       console.log('dsh english-learning: opening the default browser; pass --no-open to disable')
-      void openBrowser(webUrl).catch((error: unknown) => {
+      void openBrowser(authenticatedUrl).catch((error: unknown) => {
         const reason = error instanceof Error ? error.message : String(error)
-        console.error(`english-learning: could not open the default browser because ${reason}; open ${webUrl} manually`)
+        console.error(`english-learning: could not open the default browser because ${reason}; open ${authenticatedUrl} manually`)
       })
     }
     const settled = (wsCtx.get('loader') as { await?: () => Promise<void> } | undefined)?.await?.()
