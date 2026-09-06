@@ -13,13 +13,23 @@ interface UseModelsResult {
   addedModels: AddedModel[]
   addedLoading: boolean
   activeModel: ActiveModel | null
-  addModel: (model: AddedModel) => Promise<void>
+  addModel: (model: AddedModel, apiKey?: string) => Promise<void>
+  saveApiKey: (provider: string, apiKey: string) => Promise<void>
   removeModel: (provider: string, model: string) => Promise<void>
   setActiveModel: (provider: string, model: string) => Promise<void>
   refreshAdded: () => void
   discover: () => Promise<DiscoveredProvider[]>
   discovering: boolean
   discoverError: string | null
+}
+
+/** Extract the error message a dashboard endpoint responded with. */
+function readErrorMessage(body: unknown, status: number): string {
+  if (typeof body === 'object' && body !== null && 'error' in body) {
+    const message = (body as { error?: unknown }).error
+    if (typeof message === 'string' && message.length > 0) return message
+  }
+  return `HTTP ${status}`
 }
 
 export function useModels(): UseModelsResult {
@@ -77,16 +87,33 @@ export function useModels(): UseModelsResult {
     fetchAdded()
   }, [fetchAdded])
 
-  const addModel = useCallback(async (model: AddedModel): Promise<void> => {
+  const addModel = useCallback(async (model: AddedModel, apiKey?: string): Promise<void> => {
     const res = await fetch('/api/models/added', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(model),
+      body: JSON.stringify({
+        ...model,
+        ...(apiKey !== undefined && apiKey.trim().length > 0 ? { apiKey: apiKey.trim() } : {}),
+      }),
     })
-    if (res.ok) {
-      const data = await res.json() as { addedModels: AddedModel[]; activeModel?: ActiveModel }
-      setAddedModels(data.addedModels)
-      setActiveModelState(data.activeModel ?? null)
+    if (!res.ok) {
+      const body: unknown = await res.json().catch(() => undefined)
+      throw new Error(readErrorMessage(body, res.status))
+    }
+    const data = await res.json() as { addedModels: AddedModel[]; activeModel?: ActiveModel }
+    setAddedModels(data.addedModels)
+    setActiveModelState(data.activeModel ?? null)
+  }, [])
+
+  const saveApiKey = useCallback(async (provider: string, apiKey: string): Promise<void> => {
+    const res = await fetch('/api/models/key', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider, apiKey: apiKey.trim() }),
+    })
+    if (!res.ok) {
+      const body: unknown = await res.json().catch(() => undefined)
+      throw new Error(readErrorMessage(body, res.status))
     }
   }, [])
 
@@ -141,7 +168,7 @@ export function useModels(): UseModelsResult {
   return {
     providers, providersLoading, providersError,
     addedModels, addedLoading, activeModel,
-    addModel, removeModel, setActiveModel, refreshAdded: fetchAdded,
+    addModel, saveApiKey, removeModel, setActiveModel, refreshAdded: fetchAdded,
     discover, discovering, discoverError,
   }
 }

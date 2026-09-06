@@ -44,7 +44,7 @@ function mergeProviders(
 }
 
 export function ProviderSettings({ onSelectModel }: ProviderSettingsProps) {
-  const { addedModels, activeModel, addModel, removeModel, setActiveModel, discover, discovering, discoverError } = useModels()
+  const { addedModels, activeModel, addModel, saveApiKey, removeModel, setActiveModel, discover, discovering, discoverError } = useModels()
   const [discoveredProviders, setDiscoveredProviders] = useState<DiscoveredProvider[]>([])
   const [fetched, setFetched] = useState(false)
 
@@ -62,13 +62,21 @@ export function ProviderSettings({ onSelectModel }: ProviderSettingsProps) {
     setFetched(true)
   }
 
-  const handleAddModel = async (provider: string, model: { id: string; name?: string; description?: string }) => {
+  const handleAddModel = async (
+    provider: string,
+    model: { id: string; name?: string; description?: string },
+    apiKey?: string,
+  ) => {
     await addModel({
       provider,
       model: model.id,
       name: model.name ?? model.id,
       description: model.description,
-    })
+    }, apiKey)
+  }
+
+  const handleSaveKey = async (provider: string, apiKey: string) => {
+    await saveApiKey(provider, apiKey)
   }
 
   const handleRemoveModel = async (provider: string, model: string) => {
@@ -124,9 +132,10 @@ export function ProviderSettings({ onSelectModel }: ProviderSettingsProps) {
               models={p.models}
               addedModels={addedModels}
               activeModel={activeModel}
-              onAddModel={(prov, model) => { void handleAddModel(prov, model) }}
+              onAddModel={(prov, model, apiKey) => handleAddModel(prov, model, apiKey)}
+              onSaveKey={(prov, key) => handleSaveKey(prov, key)}
               onRemoveModel={(prov, model) => { void handleRemoveModel(prov, model) }}
-              onSelectModel={(prov, model) => { handleSelectModel(prov, model) }}
+              onSelectModel={(prov, model) => { void handleSelectModel(prov, model) }}
             />
           ))}
         </div>

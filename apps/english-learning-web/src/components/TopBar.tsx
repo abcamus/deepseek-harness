@@ -27,7 +27,7 @@ export function TopBar({ xp, xpIntoLevel, xpPerLevel, cefr, streakDays }: TopBar
       <div className="tb-center">
         <div className="tb-level">
           <span className="tb-level-ic">🎓</span>
-          <span>{CEFR_LABELS[cefr as keyof typeof CEFR_LABELS] ?? cefr}</span>
+          <span>{(CEFR_LABELS as Record<string, string>)[cefr] ?? cefr}</span>
         </div>
         <div className="tb-xp">
           <div className="tb-xp-bar"><div className="tb-xp-fill" style={{ width: `${fillPercent}%` }} /></div>

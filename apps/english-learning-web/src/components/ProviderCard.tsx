@@ -7,7 +7,8 @@ interface ProviderCardProps {
   models: DiscoveredModel[]
   addedModels: AddedModel[]
   activeModel: { provider: string; model: string } | null
-  onAddModel: (provider: string, model: DiscoveredModel) => void
+  onAddModel: (provider: string, model: DiscoveredModel, apiKey?: string) => Promise<void>
+  onSaveKey: (provider: string, apiKey: string) => Promise<void>
   onRemoveModel: (provider: string, model: string) => void
   onSelectModel: (provider: string, model: string) => void
 }
@@ -19,13 +20,32 @@ export function ProviderCard({
   addedModels,
   activeModel,
   onAddModel,
+  onSaveKey,
   onRemoveModel,
   onSelectModel,
 }: ProviderCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [keyDraft, setKeyDraft] = useState('')
+  const [keyBusy, setKeyBusy] = useState(false)
+  const [cardError, setCardError] = useState<string | null>(null)
 
   const addedIds = new Set(addedModels.filter(m => m.provider === provider).map(m => m.model))
   const isCurrentProvider = activeModel?.provider === provider
+
+  /** Run one action that may carry the typed key; a success clears the draft. */
+  const runWithKey = async (run: (apiKey?: string) => Promise<void>): Promise<void> => {
+    const apiKey = keyDraft.trim().length > 0 ? keyDraft.trim() : undefined
+    setKeyBusy(true)
+    setCardError(null)
+    try {
+      await run(apiKey)
+      setKeyDraft('')
+    } catch (error) {
+      setCardError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setKeyBusy(false)
+    }
+  }
 
   return (
     <div className={`provider-card-outer ${isCurrentProvider ? 'active' : ''}`}>
@@ -40,6 +60,23 @@ export function ProviderCard({
 
       {expanded && (
         <div className="provider-card-body">
+          <div className="provider-key-row">
+            <input
+              type="password"
+              className="provider-key-input"
+              placeholder="API Key（未配置时填写，保存后自动关联到该提供方）"
+              value={keyDraft}
+              onChange={(e) => { setKeyDraft(e.target.value); setCardError(null) }}
+            />
+            <button
+              className="settings-btn-sm"
+              disabled={keyBusy || keyDraft.trim().length === 0}
+              onClick={() => { void runWithKey(apiKey => onSaveKey(provider, apiKey ?? '')) }}
+            >
+              {keyBusy ? '保存中…' : '保存密钥'}
+            </button>
+          </div>
+          {cardError !== null && <div className="provider-key-error">{cardError}</div>}
           {models.map((m) => {
             const isAdded = addedIds.has(m.id)
             const isActive = isCurrentProvider && activeModel.model === m.id
@@ -77,7 +114,8 @@ export function ProviderCard({
                   ) : (
                     <button
                       className="settings-btn-sm primary"
-                      onClick={() => { onAddModel(provider, m) }}
+                      disabled={keyBusy}
+                      onClick={() => { void runWithKey(apiKey => onAddModel(provider, m, apiKey)) }}
                     >
                       添加
                     </button>

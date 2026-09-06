@@ -1343,6 +1343,29 @@ body {
 .settings-btn-sm.danger { color: var(--er); border-color: var(--er); }
 .settings-btn-sm.danger:hover { background: #FEF2F2; }
 
+.provider-key-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.provider-key-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--bd);
+  background: var(--bg2);
+  color: var(--tx);
+  font-family: var(--f);
+  font-size: 12px;
+}
+.provider-key-input:focus { outline: none; border-color: var(--primary); }
+.provider-key-error {
+  color: var(--er);
+  font-size: 12px;
+  margin: -4px 0 8px;
+}
+
 /* ── Reduced Motion ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }

@@ -24,6 +24,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../credentials/credentials"
+    },
+    {
       "path": "../../host/webserver"
     },
     {

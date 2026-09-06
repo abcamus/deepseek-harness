@@ -81,7 +81,7 @@ function SessionList({ sessions, titles, selectedId, onSelect, onRefresh }: Sess
           <button
             key={s.sessionId}
             className={`traj-session-item ${selectedId === s.sessionId ? 'traj-session-selected' : ''}`}
-            onClick={() => onSelect(s.sessionId)}
+            onClick={() => { onSelect(s.sessionId) }}
             title={s.sessionId}
           >
             <span className="traj-session-title">{titles[s.sessionId] ?? s.sessionId.slice(0, 8)}</span>
@@ -114,7 +114,7 @@ function TurnView({ snapshot, collapsedTurns, selectedCell, onToggleTurn, onSele
         <div className="traj-toolbar-actions">
           <button
             className="traj-toolbar-btn"
-            onClick={() => collapsedTurns.clear()}
+            onClick={() => { collapsedTurns.clear() }}
           >
             Expand All
           </button>
@@ -145,7 +145,7 @@ function TurnView({ snapshot, collapsedTurns, selectedCell, onToggleTurn, onSele
               {turn !== null && (
                 <button
                   className="traj-turn-header"
-                  onClick={() => onToggleTurn(turn)}
+                  onClick={() => { onToggleTurn(turn) }}
                 >
                   <span className="traj-turn-chevron">{isCollapsed ? '▶' : '▼'}</span>
                   <span className="traj-turn-label">Turn {t.turn}</span>
@@ -160,7 +160,7 @@ function TurnView({ snapshot, collapsedTurns, selectedCell, onToggleTurn, onSele
                     <div
                       key={cell.index}
                       className={`traj-cell traj-cell-${cell.kind} ${selectedCell === cell.index ? 'traj-cell-selected' : ''}`}
-                      onClick={() => onSelectCell(cell.index)}
+                      onClick={() => { onSelectCell(cell.index) }}
                       role="row"
                       aria-selected={selectedCell === cell.index}
                     >
@@ -237,7 +237,7 @@ export function TrajectoryPanel() {
           className="traj-url-input"
           type="text"
           value={urlInput}
-          onChange={e => setUrlInput(e.target.value)}
+          onChange={(e) => { setUrlInput(e.target.value) }}
           placeholder="DSH server URL (e.g. http://localhost:3000)"
           disabled={state.connected}
         />
@@ -265,7 +265,7 @@ export function TrajectoryPanel() {
           titles={state.titles}
           selectedId={state.selectedSessionId}
           onSelect={actions.selectSession}
-          onRefresh={actions.refreshSessions}
+          onRefresh={() => { void actions.refreshSessions() }}
         />
       )}
 

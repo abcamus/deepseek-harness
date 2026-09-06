@@ -24,6 +24,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-credentials'
+import { deriveKeyRef, piAiRouteOps } from './model-route.ts'
 import { FileSystemSkillProvider, type Config as FileSystemSkillConfig } from '@deepseek-ai/dsh-skill-filesystem'
 import type { SkillLookupOptions, SkillProvider, SkillProviderControl } from '@deepseek-ai/dsh-skill'
 import z from '@deepseek-ai/schemastery'
@@ -69,6 +72,35 @@ const ADDED_MODELS_SCHEMA = z.object({
 interface AddedModelsSettings {
   addedModels: Array<{ provider: string; model: string; name: string; description?: string }>
   disabledSkills: string[]
+}
+
+/** Settings namespace owned by the llm-pi-ai adapter plugin; routes live here. */
+const PI_AI_NS = settingsNamespace('llm-pi-ai')
+
+/**
+ * Ensure the dashboard-added provider has a pi-ai route and store a supplied
+ * key under the route's reference. A route another adapter family already owns
+ * fails the settings write and surfaces to the caller; a write with a key but
+ * no credentials seam fails loud for the same reason.
+ * @param ctx - the plugin context (settings and credentials services).
+ * @param provider - the provider route key (a pi-ai catalog id or declared route).
+ * @param apiKey - the key to store, when the caller supplied one.
+ */
+async function ensurePiAiRoute(ctx: Context, provider: string, apiKey?: string): Promise<void> {
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(provider)) {
+    throw new Error(`invalid provider name ${JSON.stringify(provider)}`)
+  }
+  const ref = deriveKeyRef(provider)
+  const descriptor = ctx.settings.describe().find(d => d.ns === PI_AI_NS)
+  const ops = piAiRouteOps(descriptor?.user, provider, ref, apiKey !== undefined)
+  if (ops.length > 0) await ctx.settings.mutate(PI_AI_NS, ops)
+  if (apiKey !== undefined) {
+    const credentials = ctx.get('credentials')
+    if (credentials === undefined) {
+      throw new Error('the composition provides no credentials seam; the API key cannot be stored')
+    }
+    await credentials.set(credentialRef(ref), apiKey)
+  }
 }
 
 /** Persistent agent handle for the chat session. */
@@ -447,6 +479,9 @@ export function apply(ctx: Context): void {
           res.end(JSON.stringify({ error: 'Missing provider or model' }))
           return
         }
+        // Activating a model added before route materialization existed still
+        // needs its pi-ai route; a stored key needs no rewrite.
+        await ensurePiAiRoute(ctx, body.provider)
         await ctx.agentDefaultModel.saveSelection({ provider: body.provider, model: body.model })
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ ok: true, selection: { provider: body.provider, model: body.model } }))
@@ -479,12 +514,19 @@ export function apply(ctx: Context): void {
             model?: string
             name?: string
             description?: string
+            apiKey?: string
           }
           if (typeof body.provider !== 'string' || typeof body.model !== 'string' || typeof body.name !== 'string') {
             res.writeHead(400, { 'content-type': 'application/json' })
             res.end(JSON.stringify({ error: 'Missing provider, model, or name' }))
             return
           }
+          const apiKey = typeof body.apiKey === 'string' && body.apiKey.trim().length > 0
+            ? body.apiKey.trim()
+            : undefined
+          // The route and credential exist before the model is listed, so an
+          // added model can serve its first message.
+          await ensurePiAiRoute(ctx, body.provider, apiKey)
           const current = addedModelsSource
           const exists = current.addedModels.some(m => m.provider === body.provider && m.model === body.model)
           const nextModels = exists
@@ -531,6 +573,36 @@ export function apply(ctx: Context): void {
       }
     },
   }), 'english-learning: added models endpoint')
+
+  // Provider key endpoint: stores one provider's API key and materializes its
+  // pi-ai route, so a provider can be configured before (or without) adding a model.
+  ctx.effect(() => webServerRef.register({
+    kind: 'exact',
+    path: '/api/models/key',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+        return
+      }
+      try {
+        const body = JSON.parse(await readBody(req)) as { provider?: string; apiKey?: string }
+        if (typeof body.provider !== 'string' || typeof body.apiKey !== 'string' || body.apiKey.trim().length === 0) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing provider or apiKey' }))
+          return
+        }
+        await ensurePiAiRoute(ctx, body.provider, body.apiKey.trim())
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: provider key error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: provider key endpoint')
 
   /** Read the active model selection from agent-default-model. */
   function getActiveModel(): { provider: string; model: string } | undefined {
@@ -642,10 +714,10 @@ export function apply(ctx: Context): void {
         break
       }
       case 'tool/result': {
-        const callId = event.data.message.content[0]?.toolCallId
-        const failed = event.data.error !== undefined || event.data.message.content[0]?.isError === true
-        const intent = callId === undefined ? undefined : pendingPlacementWrites.get(callId)
-        pendingPlacementWrites.delete(callId ?? '')
+        const callId = event.data.message.content[0].toolCallId
+        const failed = event.data.error !== undefined || event.data.message.content[0].isError === true
+        const intent = pendingPlacementWrites.get(callId)
+        pendingPlacementWrites.delete(callId)
         if (intent !== undefined && !failed) {
           if (intent.kind === 'progress') {
             placementActive = true
@@ -664,23 +736,23 @@ export function apply(ctx: Context): void {
             })
           }
         }
-        const listeningIntent = callId === undefined ? undefined : pendingListeningWrites.get(callId)
-        pendingListeningWrites.delete(callId ?? '')
+        const listeningIntent = pendingListeningWrites.get(callId)
+        pendingListeningWrites.delete(callId)
         if (listeningIntent !== undefined && listeningIntent.kind === 'exercise' && !failed) {
           broadcast('listeningExercise', { exercise: listeningIntent.exercise })
         }
-        const speakingIntent = callId === undefined ? undefined : pendingSpeakingWrites.get(callId)
-        pendingSpeakingWrites.delete(callId ?? '')
+        const speakingIntent = pendingSpeakingWrites.get(callId)
+        pendingSpeakingWrites.delete(callId)
         if (speakingIntent !== undefined && speakingIntent.kind === 'exercise' && !failed) {
           broadcast('speakingExercise', { exercise: speakingIntent.exercise })
         }
-        const readingIntent = callId === undefined ? undefined : pendingReadingWrites.get(callId)
-        pendingReadingWrites.delete(callId ?? '')
+        const readingIntent = pendingReadingWrites.get(callId)
+        pendingReadingWrites.delete(callId)
         if (readingIntent !== undefined && readingIntent.kind === 'exercise' && !failed) {
           broadcast('readingExercise', { exercise: readingIntent.exercise })
         }
-        const writingIntent = callId === undefined ? undefined : pendingWritingWrites.get(callId)
-        pendingWritingWrites.delete(callId ?? '')
+        const writingIntent = pendingWritingWrites.get(callId)
+        pendingWritingWrites.delete(callId)
         if (writingIntent !== undefined && !failed) {
           if (writingIntent.kind === 'task') {
             broadcast('writingExercise', { exercise: writingIntent.task })
