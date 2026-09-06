@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-hello",
   "description": "A simple hello world DSH app that displays hello, world",
-  "version": "0.1.0",
+  "version": "0.1.2-alpha.1",
   "publishConfig": {
     "access": "public"
   },

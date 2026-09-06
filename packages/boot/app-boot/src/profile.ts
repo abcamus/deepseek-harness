@@ -159,7 +159,7 @@ export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
     patchReload: 'startup',
   },
   'english-learning': {
-    bundles: ['@deepseek-ai/dsh-english-learning'],
+    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-english-learning'],
     patchReload: 'startup',
   },
   sdk: {
@@ -175,6 +175,9 @@ export const PROFILE_TEMPLATES: Record<string, ProfileTemplate> = {
 /** Installation-owned bundle tuples normalized to the shipped template. */
 const INSTALLATION_OWNED_PROFILE_TUPLES: Record<string, readonly string[]> = {
   headless: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'],
+  // Pre-template english-learning profiles initialized without the base bundle
+  // whose eight injected services were therefore never provided.
+  'english-learning': ['@deepseek-ai/dsh-english-learning'],
 }
 
 /** The bundle list a `dsh plugin` init uses for a name with no shipped template. */
