@@ -7,6 +7,9 @@ packages:
   - native/landlock-run/packages/*
   # Product assemblies over the package tier; apps/cli owns the `dsh` bin.
   - apps/*
+  # Desktop sidecar deploy closure: pnpm deploy materializes it into the
+  # packaged app's runtime tree (node + harness installation).
+  - desktop-closure
   - website
   # Deploy root of the single-exe build: a pure dependency manifest whose
   # closure is what the exe bundles and what the Python runtime distributes.
@@ -19,6 +22,10 @@ linkWorkspacePackages: true
 overrides:
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
+  # app-builder-lib 26.15 reads the ElectronDownloadCacheMode enum that
+  # @electron/get added in 3.1; the lockfile otherwise pins the 3.0.0 release
+  # that lacks it. Scoped to 3.x consumers so electron's own 5.x stays put.
+  '@electron/get@3': '3.1.0'
 
 peerDependencyRules:
   allowedVersions:
@@ -49,6 +56,9 @@ allowBuilds:
   msedge-tts: true
   # Desktop shell: the postinstall downloads the Electron platform binary.
   electron: true
+  # electron-builder dependency for Squirrel.Windows installers, which the
+  # desktop shell does not use (NSIS + portable); deny its build script.
+  electron-winstaller: false
 
 minimumReleaseAgeExclude:
   # Fresh pi-ai releases carry the model catalog updates that are the whole

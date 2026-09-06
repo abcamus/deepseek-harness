@@ -46,6 +46,10 @@ worktrees/
 .opencode
 *.jpg
 apps/english-learning-web/dist/**
+# Desktop shell packaging output: the assembled sidecar runtime and the
+# electron-builder products built from it.
+apps/desktop/build/
+apps/desktop/dist-packages/
 # Root tsdown output and tsc artifacts emitted in place next to TS sources.
 dist/
 packages/**/src/**/*.js

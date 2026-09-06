@@ -36,21 +36,29 @@ const READY_TIMEOUT_MS = 600_000
 /** Environment variable holding a packaged sidecar executable path. */
 const SIDECAR_ENV = 'DSH_DESKTOP_SIDECAR'
 
+/** The backend entry inside the packaged sidecar runtime tree. */
+const SIDECAR_ENTRY = 'runtime/node_modules/@deepseek-ai/dsh/lib/bin.js'
+
 let child: ReturnType<typeof spawn> | undefined
 let mainWindow: BrowserWindow | undefined
 let quitting = false
 
 /**
- * Resolve the command launching the backend. A packaged shell runs the SEA
- * sidecar named by {@link SIDECAR_ENV}; an unpacked shell runs the repository
- * CLI through pnpm (`pnpm run dsh` = `node --import tsx/esm apps/cli/src/bin.ts`).
+ * Resolve the command launching the backend. A packaged shell runs the
+ * sidecar runtime staged under the app resources — a real Node binary plus the
+ * npm-installed harness tree, so profile bundle resolution and native addons
+ * match a normal installation. `DSH_DESKTOP_SIDECAR` overrides this with a
+ * single SEA-style executable. An unpacked shell runs the repository CLI
+ * through pnpm (`pnpm run dsh` = `node --import tsx/esm apps/cli/src/bin.ts`).
  * @returns The executable and its argument list.
  */
 function resolveSidecar(): { command: string; args: string[] } {
   const sidecar = process.env[SIDECAR_ENV]
   if (sidecar !== undefined && sidecar !== '') return { command: sidecar, args: [...BACKEND_ARGS] }
   if (app.isPackaged) {
-    throw new Error(`packaged shell requires ${SIDECAR_ENV} to name the dsh sidecar executable`)
+    const sidecarDir = join(process.resourcesPath, 'sidecar')
+    const nodeBinary = join(sidecarDir, process.platform === 'win32' ? 'node.exe' : 'node')
+    return { command: nodeBinary, args: [join(sidecarDir, SIDECAR_ENTRY), ...BACKEND_ARGS] }
   }
   // lib/main.js → apps/desktop/lib → apps/desktop → apps → repository root.
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')

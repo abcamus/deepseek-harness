@@ -3,16 +3,55 @@
   "description": "Desktop shell for the DSH English-learning profile: spawns the dsh backend and shows its dashboard",
   "version": "0.1.2-alpha.1",
   "license": "MIT",
+  "author": "DeepSeek Harness",
   "private": true,
   "type": "module",
   "main": "lib/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "npm run build && electron ."
+    "start": "npm run build && electron .",
+    "sidecar:mac": "tsx ../../scripts/package-desktop-sidecar.ts --platform mac",
+    "sidecar:win": "tsx ../../scripts/package-desktop-sidecar.ts --platform win",
+    "dist:mac:dir": "npm run build && npm run sidecar:mac && electron-builder --mac dir --x64",
+    "dist:win": "npm run build && npm run sidecar:win && electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "ai.deepseek.english-learning",
+    "productName": "DeepSeek English Learning",
+    "directories": {
+      "output": "dist-packages"
+    },
+    "files": [
+      "lib/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/sidecar",
+        "to": "sidecar",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    }
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
     "electron": "^39.0.0",
+    "electron-builder": "^26.0.0",
     "typescript": "^6.0.0"
   }
 }
