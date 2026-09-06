@@ -1,20 +1,19 @@
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ChatMessage, SSEStatus } from '../types'
+import { ChatInput } from './ChatInput'
+import { ChatTranscript } from './ChatTranscript'
 
 interface AIChatProps {
   messages: ChatMessage[]
   status: SSEStatus
+  /** Whether a placement assessment is streaming; shows the entry banner into the full-screen view. */
+  placementActive: boolean
   onSend: (text: string) => void | Promise<void>
+  onEnterAssessment: () => void
 }
 
-export function AIChat({ messages, status, onSend }: AIChatProps) {
+export function AIChat({ messages, status, placementActive, onSend, onEnterAssessment }: AIChatProps) {
   const [open, setOpen] = useState(false)
-  const [input, setInput] = useState('')
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
 
   // Programmatic sends (assessment start, material analysis, practice) arrive while the
   // panel is collapsed; open it whenever a user message lands.
@@ -23,21 +22,6 @@ export function AIChat({ messages, status, onSend }: AIChatProps) {
     if (last !== undefined && last.role === 'user') setOpen(true)
   }, [messages])
 
-  const handleSubmit = () => {
-    if (input.trim() === '' || status !== 'connected') return
-    void onSend(input.trim())
-    setInput('')
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
-    }
-  }
-
-  const statusLabel = status === 'connected' ? '在线' : status === 'connecting' ? '连接中...' : '离线'
-
   return (
     <div className="ai-float">
       <button className="ai-btn" onClick={() => { setOpen(!open) }}>🤖</button>
@@ -45,42 +29,18 @@ export function AIChat({ messages, status, onSend }: AIChatProps) {
         <div className="ai-chat-header">
           <div className="ai-chat-avatar">🤖</div>
           <div className="ai-chat-title">AI 学习助手</div>
-          <div className="ai-chat-status">{statusLabel}</div>
+          <div className="ai-chat-status">{statusLabel(status)}</div>
         </div>
 
-        <div className="ai-chat-messages">
-          {messages.length === 0 && (
-            <div className="ai-msg">
-              <div className="ai-msg-icon">💡</div>
-              <div className="ai-msg-text">
-                你好！我是你的 AI 学习助手。你可以问我任何英语学习相关的问题，或者让我帮你找学习资料。
-              </div>
-            </div>
-          )}
-          {messages.map(msg => (
-            <div key={msg.id} className={`ai-msg ${msg.role}`}>
-              <div className="ai-msg-icon">{msg.role === 'user' ? '👤' : '🤖'}</div>
-              <div className={`ai-msg-text ${msg.streaming ? 'streaming' : ''}`}>
-                {msg.text}
-              </div>
-            </div>
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-
-        <div className="ai-chat-input">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => { setInput(e.target.value) }}
-            onKeyDown={handleKeyDown}
-            placeholder="输入消息..."
-            disabled={status !== 'connected'}
-          />
-          <button onClick={handleSubmit} disabled={status !== 'connected' || input.trim() === ''}>
-            发送
+        {placementActive && (
+          <button className="ai-assess-banner" onClick={onEnterAssessment}>
+            <span>📐 定级测评进行中</span>
+            <span className="ai-assess-banner-link">进入测评视图 →</span>
           </button>
-        </div>
+        )}
+
+        <ChatTranscript messages={messages} />
+        <ChatInput status={status} onSend={onSend} />
 
         <div className="ai-suggestions">
           <span className="ai-sug" onClick={() => { void onSend('帮我找一些 B1 级别的听力材料') }}>找资料</span>
@@ -91,4 +51,8 @@ export function AIChat({ messages, status, onSend }: AIChatProps) {
       </div>
     </div>
   )
+}
+
+function statusLabel(status: SSEStatus): string {
+  return status === 'connected' ? '在线' : status === 'connecting' ? '连接中...' : '离线'
 }

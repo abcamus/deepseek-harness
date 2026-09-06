@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { CEFR_LABELS } from '../lib/abilities'
 
 interface TopBarProps {
   /** Total XP earned from real learning records. */
@@ -11,10 +12,6 @@ interface TopBarProps {
   cefr: string
   /** Consecutive learning days derived from learning records. */
   streakDays: number
-}
-
-const CEFR_LABELS: Record<string, string> = {
-  A1: 'A1 入门', A2: 'A2 初级', B1: 'B1 中级', B2: 'B2 中高级', C1: 'C1 高级', C2: 'C2 精通',
 }
 
 export function TopBar({ xp, xpIntoLevel, xpPerLevel, cefr, streakDays }: TopBarProps) {
@@ -30,7 +27,7 @@ export function TopBar({ xp, xpIntoLevel, xpPerLevel, cefr, streakDays }: TopBar
       <div className="tb-center">
         <div className="tb-level">
           <span className="tb-level-ic">🎓</span>
-          <span>{CEFR_LABELS[cefr] ?? cefr}</span>
+          <span>{CEFR_LABELS[cefr as keyof typeof CEFR_LABELS] ?? cefr}</span>
         </div>
         <div className="tb-xp">
           <div className="tb-xp-bar"><div className="tb-xp-fill" style={{ width: `${fillPercent}%` }} /></div>
@@ -40,6 +37,10 @@ export function TopBar({ xp, xpIntoLevel, xpPerLevel, cefr, streakDays }: TopBar
       <div className="tb-right">
         <div className="tb-stat tb-fire">🔥 {streakDays}天</div>
         {/* <button className="tb-btn" title="上传资料">📁</button> */}
+        <Link to="/listening" className="tb-btn" title="听力练习" style={{ textDecoration: 'none' }}>🎧</Link>
+        <Link to="/speaking" className="tb-btn" title="口语练习" style={{ textDecoration: 'none' }}>🗣️</Link>
+        <Link to="/reading" className="tb-btn" title="阅读理解" style={{ textDecoration: 'none' }}>📖</Link>
+        <Link to="/writing" className="tb-btn" title="写作练习" style={{ textDecoration: 'none' }}>✍️</Link>
         <Link to="/settings" className="tb-btn" title="设置" style={{ textDecoration: 'none' }}>⚙️</Link>
       </div>
     </div>

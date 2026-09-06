@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-english-learning",
   "description": "English Learning Agent - Material Digest, Knowledge Extractor, Exercise Generator",
-  "version": "0.1.0",
+  "version": "0.1.2-alpha.1",
   "publishConfig": {
     "access": "public"
   },
@@ -18,7 +18,6 @@
       "default": "./lib/index.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
@@ -33,24 +32,25 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/dsh-agent-presets": "workspace:^",
+    "@deepseek-ai/dsh-api-remotes": "workspace:^",
+    "@deepseek-ai/dsh-api-session-controller": "workspace:^",
+    "@deepseek-ai/dsh-client-connection": "workspace:^",
+    "@deepseek-ai/dsh-code-runtime-worker-thread": "workspace:^",
     "@deepseek-ai/dsh-english-learning-web": "workspace:^",
-    "@deepseek-ai/dsh-web": "workspace:^",
+    "@deepseek-ai/dsh-headless": "workspace:^",
     "@deepseek-ai/dsh-host-webserver": "workspace:^",
-    "@deepseek-ai/dsh-web-search-deepseek": "workspace:^",
-    "@deepseek-ai/dsh-web-fetch-http": "workspace:^",
-    "@deepseek-ai/dsh-tool-web": "workspace:^",
-    "@deepseek-ai/dsh-web-fetch-xiaohongshu": "workspace:^",
     "@deepseek-ai/dsh-skill": "workspace:^",
     "@deepseek-ai/dsh-skill-filesystem": "workspace:^",
     "@deepseek-ai/dsh-tool-skill": "workspace:^",
-    "@deepseek-ai/dsh-agent-presets": "workspace:^",
-    "@deepseek-ai/dsh-headless": "workspace:^",
-    "@deepseek-ai/dsh-code-runtime-worker-thread": "workspace:^",
-    "@deepseek-ai/dsh-client-connection": "workspace:^",
-    "@deepseek-ai/dsh-api-remotes": "workspace:^",
-    "@deepseek-ai/dsh-api-session-controller": "workspace:^",
-    "@deepseek-ai/dsh-workspace": "workspace:^"
+    "@deepseek-ai/dsh-tool-web": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@deepseek-ai/dsh-web": "workspace:^",
+    "@deepseek-ai/dsh-web-fetch-http": "workspace:^",
+    "@deepseek-ai/dsh-web-fetch-xiaohongshu": "workspace:^",
+    "@deepseek-ai/dsh-web-search-deepseek": "workspace:^",
+    "@deepseek-ai/dsh-workspace": "workspace:^",
+    "msedge-tts": "^2.0.7"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"

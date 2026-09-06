@@ -1,9 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import type { ChatMessage, SSEStatus } from '../types'
+import type { ChatMessage, LearnerProfile, ListeningExercise, PlacementProgress, ReadingExercise, SpeakingExercise, SSEStatus, WritingDoc } from '../types'
 
 export function useSSE() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [status, setStatus] = useState<SSEStatus>('connecting')
+  const [placementProgress, setPlacementProgress] = useState<PlacementProgress | null>(null)
+  const [listeningExercise, setListeningExercise] = useState<ListeningExercise | null>(null)
+  const [speakingExercise, setSpeakingExercise] = useState<SpeakingExercise | null>(null)
+  const [readingExercise, setReadingExercise] = useState<ReadingExercise | null>(null)
+  const [writingDoc, setWritingDoc] = useState<WritingDoc | null>(null)
   const evtSourceRef = useRef<EventSource | null>(null)
   const streamingIdRef = useRef<string | null>(null)
 
@@ -58,6 +63,45 @@ export function useSSE() {
         streamingIdRef.current = null
       })
 
+      es.addEventListener('placement', ((e: MessageEvent) => {
+        const data = JSON.parse(e.data as string) as PlacementProgress
+        setPlacementProgress(data)
+      }) as EventListener)
+
+      es.addEventListener('placementComplete', ((e: MessageEvent) => {
+        const data = JSON.parse(e.data as string) as { profile: LearnerProfile }
+        setPlacementProgress(null)
+        setMessages(prev => [
+          ...prev,
+          { id: `placement-result-${Date.now()}`, role: 'assistant', text: '', placementResult: data.profile },
+        ])
+      }) as EventListener)
+
+      es.addEventListener('listeningExercise', ((e: MessageEvent) => {
+        const data = JSON.parse(e.data as string) as { exercise: ListeningExercise }
+        setListeningExercise(data.exercise)
+      }) as EventListener)
+
+      es.addEventListener('speakingExercise', ((e: MessageEvent) => {
+        const data = JSON.parse(e.data as string) as { exercise: SpeakingExercise }
+        setSpeakingExercise(data.exercise)
+      }) as EventListener)
+
+      es.addEventListener('readingExercise', ((e: MessageEvent) => {
+        const data = JSON.parse(e.data as string) as { exercise: ReadingExercise }
+        setReadingExercise(data.exercise)
+      }) as EventListener)
+
+      es.addEventListener('writingExercise', ((e: MessageEvent) => {
+        const data = JSON.parse(e.data as string) as { exercise: WritingDoc }
+        setWritingDoc(data.exercise)
+      }) as EventListener)
+
+      es.addEventListener('writingResult', ((e: MessageEvent) => {
+        const data = JSON.parse(e.data as string) as { result: WritingDoc }
+        setWritingDoc(data.result)
+      }) as EventListener)
+
       es.addEventListener('error', ((e: MessageEvent) => {
         const data = JSON.parse(e.data as string) as { error: string }
         console.error('agent error:', data.error)
@@ -92,5 +136,11 @@ export function useSSE() {
     }
   }, [])
 
-  return { messages, status, sendMessage }
+  return {
+    messages, status, sendMessage, placementProgress,
+    listeningExercise, setListeningExercise,
+    speakingExercise, setSpeakingExercise,
+    readingExercise, setReadingExercise,
+    writingDoc, setWritingDoc,
+  }
 }

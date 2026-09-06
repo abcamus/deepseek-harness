@@ -3,7 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router'
 import type { Settings, CEFRLevel, LearnerProfile } from '../types'
 import { saveManualProfile } from '../lib/profile'
 import { useModels } from '../hooks/useModels'
+import { PlacementResult } from './PlacementResult'
 import { ProviderSettings } from './ProviderSettings'
+import { SkillsPanel } from './SkillsPanel'
 import { TrajectoryPanel } from './TrajectoryPanel'
 
 interface SettingsPageProps {
@@ -17,11 +19,12 @@ interface SettingsPageProps {
 const CEFR_OPTIONS: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const DAILY_GOALS = [15, 30, 45, 60, 90]
 
-type Tab = 'profile' | 'ai' | 'display' | 'trajectory'
+type Tab = 'profile' | 'ai' | 'skills' | 'display' | 'trajectory'
 
 const TABS: { id: Tab; icon: string; label: string }[] = [
   { id: 'profile', icon: '👤', label: '个人资料' },
   { id: 'ai', icon: '🤖', label: '模型设置' },
+  { id: 'skills', icon: '🧩', label: '技能配置' },
   { id: 'display', icon: '🎨', label: '显示设置' },
   { id: 'trajectory', icon: '📈', label: '轨迹' },
 ]
@@ -152,17 +155,7 @@ export function SettingsPage({ settings, profile, onSave, onProfileSaved, onReta
 
               <div className="settings-group">
                 <label className="settings-label">初始定级测评</label>
-                {profile !== null && (
-                  <div className="settings-hint">
-                    当前水平由{profile.source === 'placement' ? '定级测评' : '手动设置'}评定为 {profile.currentLevel}
-                    {profile.summary === undefined ? '' : `：${profile.summary}`}
-                  </div>
-                )}
-                {profile !== null && profile.skills !== undefined && (
-                  <div className="settings-hint">
-                    分项：听力 {profile.skills.listening ?? '—'} · 口语 {profile.skills.speaking ?? '—'} · 阅读 {profile.skills.reading ?? '—'} · 写作 {profile.skills.writing ?? '—'}
-                  </div>
-                )}
+                {profile !== null && <PlacementResult profile={profile} />}
                 <div className="settings-hint">测评通过与 AI 助手对话完成，结果决定资料难度和练习起点</div>
                 <button className="settings-btn" onClick={onRetakeAssessment}>
                   {profile === null ? '开始定级测评' : '重新测评'}
@@ -178,6 +171,8 @@ export function SettingsPage({ settings, profile, onSave, onProfileSaved, onReta
               onSelectModel={(p, m) => { void handleSelectModel(p, m) }}
             />
           )}
+
+          {tab === 'skills' && <SkillsPanel />}
 
           {tab === 'display' && (
             <>

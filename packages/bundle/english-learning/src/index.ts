@@ -25,10 +25,25 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { FileSystemSkillProvider, type Config as FileSystemSkillConfig } from '@deepseek-ai/dsh-skill-filesystem'
+import type { SkillLookupOptions, SkillProvider, SkillProviderControl } from '@deepseek-ai/dsh-skill'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent'
+import { ABILITY_IDS, CEFR_LEVELS, classifyPlacementWrite, parseLearnerProfile, parsePlacementProgress,
+  type LearnerProfile,
+  type PlacementWriteIntent } from './placement.ts'
+import { classifyListeningWrite, parseListeningExercise,
+  type ListeningWriteIntent } from './listening.ts'
+import { classifyReadingWrite, parseReadingExercise,
+  type ReadingWriteIntent } from './reading.ts'
+import { classifySpeakingWrite, parseSpeakingExercise,
+  type SpeakingWriteIntent } from './speaking.ts'
+import { classifyWritingWrite, parseWritingDocument,
+  type WritingWriteIntent } from './writing.ts'
+import { isSkillName, mergeSkillInfos, parseSkillFrontmatter, toggleDisabledSkills,
+  type SkillFrontmatter } from './skill-catalog.ts'
+import { isTtsVoice, synthesizeSpeech, TTS_MAX_TEXT_LENGTH } from './tts.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'english-learning'
@@ -36,10 +51,10 @@ export const name = 'english-learning'
 /** Core services required by this bundle's plugin. */
 export const inject = ['tools', 'skills', 'web', 'webServer', 'agents', 'llm', 'settings', 'agentDefaultModel'] as const
 
-/** Settings namespace for the english-learning model list. */
+/** Settings namespace for the english-learning model list and skill configuration. */
 const NS = settingsNamespace('english-learning')
 
-/** Schema for the added-models list stored in settings.yaml. */
+/** Schema for the dashboard settings stored in settings.yaml: the added-models list and the disabled preset skills. */
 const ADDED_MODELS_SCHEMA = z.object({
   addedModels: z.array(z.object({
     provider: z.string().required(),
@@ -47,11 +62,13 @@ const ADDED_MODELS_SCHEMA = z.object({
     name: z.string().required(),
     description: z.string(),
   })),
+  disabledSkills: z.array(z.string()),
 })
 
 /** Shape of the english-learning settings section. */
 interface AddedModelsSettings {
   addedModels: Array<{ provider: string; model: string; name: string; description?: string }>
+  disabledSkills: string[]
 }
 
 /** Persistent agent handle for the chat session. */
@@ -92,6 +109,24 @@ const VOCABULARY_DIR = join(process.cwd(), '.english-learning', 'vocabulary')
 /** Learner placement record under the launch workspace: agent-written during an assessment, dashboard-written for a manual level pick. */
 const PROFILE_PATH = join(process.cwd(), '.english-learning', 'profile.json')
 
+/** In-flight assessment stage document the placement skill rewrites at every stage transition. */
+const PLACEMENT_PROGRESS_PATH = join(process.cwd(), '.english-learning', 'placement-progress.json')
+
+/** In-flight listening exercise document the exercise-generator skill writes for the listening page. */
+const LISTENING_SESSION_PATH = join(process.cwd(), '.english-learning', 'listening-session.json')
+
+/** In-flight reading exercise document the exercise-generator skill writes for the reading page. */
+const READING_SESSION_PATH = join(process.cwd(), '.english-learning', 'reading-session.json')
+
+/** In-flight writing session document the exercise-generator skill writes and rewrites (task, then graded result). */
+const WRITING_SESSION_PATH = join(process.cwd(), '.english-learning', 'writing-session.json')
+
+/** In-flight speaking exercise document the exercise-generator skill writes for the speaking page. */
+const SPEAKING_SESSION_PATH = join(process.cwd(), '.english-learning', 'speaking-session.json')
+
+/** Disk cache for synthesized listening-passage audio, keyed by text+voice. */
+const TTS_CACHE_DIR = join(process.cwd(), '.english-learning', 'tts-cache')
+
 /** One learning material registered by the dashboard. */
 interface MaterialEntry {
   id: string
@@ -120,22 +155,6 @@ interface VocabularyEntry {
   level?: string
   words: Array<{ word: string; definition: string; example?: string }>
 }
-
-/** Learner placement record: the assessed (source placement) or manually picked (source manual) CEFR level. */
-interface LearnerProfile {
-  time: number
-  kind: 'placement'
-  source: 'placement' | 'manual'
-  currentLevel: string
-  skills?: Partial<Record<(typeof ABILITY_IDS)[number], string>>
-  weakSkills?: Array<(typeof ABILITY_IDS)[number]>
-  summary?: string
-}
-
-const ABILITY_IDS = ['listening', 'speaking', 'reading', 'writing'] as const
-
-/** Valid CEFR levels for a placement record. */
-const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] as const
 
 /** XP awarded per learning record kind. */
 const XP_PER_DIGEST = 40
@@ -225,44 +244,6 @@ async function readVocabularyEntries(): Promise<VocabularyEntry[]> {
     })
   }
   return entries.sort((a, b) => b.time - a.time)
-}
-
-/** Parse the placement file; returns undefined for malformed or non-conforming content. */
-function parseLearnerProfile(content: string): LearnerProfile | undefined {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(content)
-  } catch {
-    return undefined
-  }
-  if (typeof parsed !== 'object' || parsed === null) return undefined
-  const record = parsed as Record<string, unknown>
-  if (typeof record.time !== 'number' || !Number.isFinite(record.time)) return undefined
-  if (record.kind !== 'placement') return undefined
-  if (record.source !== 'placement' && record.source !== 'manual') return undefined
-  if (typeof record.currentLevel !== 'string' || !(CEFR_LEVELS as readonly string[]).includes(record.currentLevel)) return undefined
-  const profile: Record<string, unknown> = {
-    time: record.time,
-    kind: record.kind,
-    source: record.source,
-    currentLevel: record.currentLevel,
-  }
-  if (typeof record.summary === 'string') profile.summary = record.summary
-  if (Array.isArray(record.weakSkills)) {
-    const weak = record.weakSkills.filter((skill): skill is (typeof ABILITY_IDS)[number] =>
-      typeof skill === 'string' && (ABILITY_IDS as readonly string[]).includes(skill))
-    if (weak.length > 0) profile.weakSkills = weak
-  }
-  if (typeof record.skills === 'object' && record.skills !== null) {
-    const levels = record.skills as Record<string, unknown>
-    const perSkill: Partial<Record<(typeof ABILITY_IDS)[number], string>> = {}
-    for (const id of ABILITY_IDS) {
-      const level = levels[id]
-      if (typeof level === 'string' && (CEFR_LEVELS as readonly string[]).includes(level)) perSkill[id] = level
-    }
-    if (Object.keys(perSkill).length > 0) profile.skills = perSkill
-  }
-  return profile as unknown as LearnerProfile
 }
 
 /** Read the learner placement record; a missing or malformed file reads as no profile. */
@@ -377,8 +358,12 @@ export function apply(ctx: Context): void {
   const distRoot = dirname(distIndex)
 
   // Register the preset's skills (material-digest, knowledge-extractor, exercise-generator,
-  // material-search) as an extra skill root so chat agents see them in the catalog.
+  // material-search, placement-assessment) as an extra skill root so chat agents see them
+  // in the catalog. A thin wrapper provider filters out the skills the learner disabled in
+  // the dashboard; toggling a skill invalidates the registration so the catalog republishes
+  // on the tutor's next turn.
   let presetSkillProvider: FileSystemSkillProvider | undefined
+  let presetSkillControl: SkillProviderControl | undefined
   const presetSkillConfig: FileSystemSkillConfig = {
     providerName: 'english-learning',
     includeDefaultRoots: false,
@@ -386,8 +371,25 @@ export function apply(ctx: Context): void {
     watch: false,
   }
   ctx.skills.registerProvider((control) => {
+    presetSkillControl = control
     presetSkillProvider = new FileSystemSkillProvider(ctx, control, presetSkillConfig)
-    return presetSkillProvider
+    const provider: SkillProvider = {
+      name: 'english-learning',
+      async list(options: SkillLookupOptions) {
+        const inner = presetSkillProvider
+        if (inner === undefined) return []
+        const result = await inner.list(options)
+        if (!Array.isArray(result)) return result
+        const disabled = addedModelsSource.disabledSkills
+        return result.filter(candidate => !disabled.includes(candidate.name))
+      },
+      async get(candidate, options) {
+        const inner = presetSkillProvider
+        if (inner === undefined) return undefined
+        return inner.get(candidate, options)
+      },
+    }
+    return provider
   })
   ctx.effect(function* () {
     yield async () => { await presetSkillProvider?.dispose() }
@@ -408,21 +410,25 @@ export function apply(ctx: Context): void {
   }
 
   // Register the added-models settings section.
-  const defaultAddedModels: AddedModelsSettings = { addedModels: [] }
+  const defaultAddedModels: AddedModelsSettings = { addedModels: [], disabledSkills: [] }
   let addedModelsSource: AddedModelsSettings = defaultAddedModels
 
   // Capture webServer reference before inject (sctx may not have it)
   const webServerRef = ctx.webServer
 
-  const scope = ctx.settings.register(NS, ADDED_MODELS_SCHEMA, { base: { addedModels: [] } })
+  const scope = ctx.settings.register(NS, ADDED_MODELS_SCHEMA, { base: { addedModels: [], disabledSkills: [] } })
 
   function syncSource(): void {
     const models = scope.get()
-    addedModelsSource = { addedModels: models.addedModels }
+    addedModelsSource = { addedModels: models.addedModels, disabledSkills: models.disabledSkills }
   }
   syncSource()
   ctx.effect(() => () => { addedModelsSource = defaultAddedModels })
-  scope.watch(() => { syncSource() })
+  scope.watch(() => {
+    syncSource()
+    // Skill toggles re-publish the catalog on the tutor's next turn.
+    presetSkillControl?.invalidate()
+  })
 
   // Settings model endpoint: saves the user's active model selection
   ctx.effect(() => webServerRef.register({
@@ -563,6 +569,32 @@ export function apply(ctx: Context): void {
     }
   }
 
+  // Placement tracking state: stage transitions and completion are read out of the
+  // chat agent's `write` calls to the placement files, broadcast only after the
+  // write's tool result confirms it landed on disk.
+  const pendingPlacementWrites = new Map<string, PlacementWriteIntent>()
+  let placementActive = false
+
+  // Listening practice state: the exercise-generator skill writes the full exercise
+  // (passage, questions, answer key) to the listening session file when the request
+  // comes from the listening page; the page grades and reports the score itself.
+  const pendingListeningWrites = new Map<string, ListeningWriteIntent>()
+
+  // Speaking practice state mirrors the listening pipeline: the skill writes the
+  // sentence list to the speaking session file, the page records and scores each
+  // line client-side, then reports the outcome.
+  const pendingSpeakingWrites = new Map<string, SpeakingWriteIntent>()
+
+  // Reading practice state mirrors the listening pipeline: the skill writes the
+  // quiz document (passage, questions, answer key) to the reading session file,
+  // the page grades against the key, then reports the outcome.
+  const pendingReadingWrites = new Map<string, ReadingWriteIntent>()
+
+  // Writing practice state: the session file carries two phases — the assignment,
+  // then the skill's graded outcome after it critiques the essay the page submits
+  // through the chat. The page shows the outcome and reports the score itself.
+  const pendingWritingWrites = new Map<string, WritingWriteIntent>()
+
   // Subscribe to session events and forward to SSE clients
   ctx.on('session/event', (session, event) => {
     if (chatAgent === undefined) return
@@ -583,6 +615,78 @@ export function apply(ctx: Context): void {
           .join('')
         if (text !== '') {
           broadcast('message', { text })
+        }
+        break
+      }
+      case 'tool/call': {
+        const intent = classifyPlacementWrite(event.data)
+        if (intent.kind !== 'none') {
+          pendingPlacementWrites.set(event.data.callId, intent)
+        }
+        const listeningIntent = classifyListeningWrite(event.data)
+        if (listeningIntent.kind !== 'none') {
+          pendingListeningWrites.set(event.data.callId, listeningIntent)
+        }
+        const speakingIntent = classifySpeakingWrite(event.data)
+        if (speakingIntent.kind !== 'none') {
+          pendingSpeakingWrites.set(event.data.callId, speakingIntent)
+        }
+        const readingIntent = classifyReadingWrite(event.data)
+        if (readingIntent.kind !== 'none') {
+          pendingReadingWrites.set(event.data.callId, readingIntent)
+        }
+        const writingIntent = classifyWritingWrite(event.data)
+        if (writingIntent.kind !== 'none') {
+          pendingWritingWrites.set(event.data.callId, writingIntent)
+        }
+        break
+      }
+      case 'tool/result': {
+        const callId = event.data.message.content[0]?.toolCallId
+        const failed = event.data.error !== undefined || event.data.message.content[0]?.isError === true
+        const intent = callId === undefined ? undefined : pendingPlacementWrites.get(callId)
+        pendingPlacementWrites.delete(callId ?? '')
+        if (intent !== undefined && !failed) {
+          if (intent.kind === 'progress') {
+            placementActive = true
+            broadcast('placement', {
+              stage: intent.progress.stage,
+              round: intent.progress.round,
+              totalRounds: intent.progress.totalRounds,
+              time: intent.progress.time,
+            })
+          } else if (intent.kind === 'profile' && placementActive) {
+            placementActive = false
+            broadcast('placementComplete', { profile: intent.profile })
+            void unlink(PLACEMENT_PROGRESS_PATH).catch(() => {
+              // The next assessment overwrites the leftover progress file, so a failed
+              // cleanup only risks a stale UI hint, nothing the agent reads.
+            })
+          }
+        }
+        const listeningIntent = callId === undefined ? undefined : pendingListeningWrites.get(callId)
+        pendingListeningWrites.delete(callId ?? '')
+        if (listeningIntent !== undefined && listeningIntent.kind === 'exercise' && !failed) {
+          broadcast('listeningExercise', { exercise: listeningIntent.exercise })
+        }
+        const speakingIntent = callId === undefined ? undefined : pendingSpeakingWrites.get(callId)
+        pendingSpeakingWrites.delete(callId ?? '')
+        if (speakingIntent !== undefined && speakingIntent.kind === 'exercise' && !failed) {
+          broadcast('speakingExercise', { exercise: speakingIntent.exercise })
+        }
+        const readingIntent = callId === undefined ? undefined : pendingReadingWrites.get(callId)
+        pendingReadingWrites.delete(callId ?? '')
+        if (readingIntent !== undefined && readingIntent.kind === 'exercise' && !failed) {
+          broadcast('readingExercise', { exercise: readingIntent.exercise })
+        }
+        const writingIntent = callId === undefined ? undefined : pendingWritingWrites.get(callId)
+        pendingWritingWrites.delete(callId ?? '')
+        if (writingIntent !== undefined && !failed) {
+          if (writingIntent.kind === 'task') {
+            broadcast('writingExercise', { exercise: writingIntent.task })
+          } else if (writingIntent.kind === 'result') {
+            broadcast('writingResult', { result: writingIntent.result })
+          }
         }
         break
       }
@@ -752,6 +856,433 @@ export function apply(ctx: Context): void {
       }
     },
   }), 'english-learning: profile endpoint')
+
+  // Placement progress endpoint: the in-flight assessment stage the agent reports at
+  // each stage transition, or null when no assessment is running. Lets a freshly
+  // reloaded dashboard restore the assessment view without waiting for the next write.
+  const webServerForPlacement = ctx.webServer
+  ctx.effect(() => webServerForPlacement.register({
+    kind: 'exact',
+    path: '/api/placement',
+    handler: async (_req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const content = await readFile(PLACEMENT_PROGRESS_PATH, 'utf8').catch(() => undefined)
+        const progress = content === undefined ? undefined : parsePlacementProgress(content)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ progress: progress ?? null }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: placement error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: placement progress endpoint')
+
+  // Listening session endpoint: GET returns the pending listening exercise the
+  // exercise-generator skill wrote for the listening page, or null when none is
+  // pending. Lets a freshly reloaded page restore the practice without waiting for
+  // the next generation.
+  const webServerForListening = ctx.webServer
+  ctx.effect(() => webServerForListening.register({
+    kind: 'exact',
+    path: '/api/listening',
+    handler: async (_req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const content = await readFile(LISTENING_SESSION_PATH, 'utf8').catch(() => undefined)
+        const exercise = content === undefined ? undefined : parseListeningExercise(content)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ exercise: exercise ?? null }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: listening error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: listening session endpoint')
+
+  // Speaking session endpoint: GET returns the pending speaking exercise the
+  // exercise-generator skill wrote for the speaking page, or null when none is
+  // pending, so a reloaded page restores the round.
+  const webServerForSpeaking = ctx.webServer
+  ctx.effect(() => webServerForSpeaking.register({
+    kind: 'exact',
+    path: '/api/speaking',
+    handler: async (_req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const content = await readFile(SPEAKING_SESSION_PATH, 'utf8').catch(() => undefined)
+        const exercise = content === undefined ? undefined : parseSpeakingExercise(content)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ exercise: exercise ?? null }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: speaking error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: speaking session endpoint')
+
+  // Speaking result endpoint: the speaking page scores each recorded line
+  // client-side and reports the outcome here. The backend turns it into the same
+  // progress record shape the exercise-generator skill writes for chat-graded
+  // rounds, then retires the session document.
+  const webServerForSpeakingResult = ctx.webServer
+  ctx.effect(() => webServerForSpeakingResult.register({
+    kind: 'exact',
+    path: '/api/speaking/result',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Method not allowed' }))
+          return
+        }
+        const body = JSON.parse(await readBody(req)) as { count?: number; correct?: number }
+        if (typeof body.count !== 'number' || !Number.isInteger(body.count) || body.count < 1
+          || typeof body.correct !== 'number' || !Number.isInteger(body.correct)
+          || body.correct < 0 || body.correct > body.count) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing or invalid count/correct' }))
+          return
+        }
+        const content = await readFile(SPEAKING_SESSION_PATH, 'utf8').catch(() => undefined)
+        const exercise = content === undefined ? undefined : parseSpeakingExercise(content)
+        if (exercise === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'No speaking session is pending' }))
+          return
+        }
+        const record: ProgressRecord = {
+          time: Date.now(),
+          kind: 'exercise',
+          skill: 'speaking',
+          count: body.count,
+          correct: body.correct,
+        }
+        if (exercise.material !== undefined) record.material = exercise.material
+        if (exercise.level !== undefined) record.level = exercise.level
+        await mkdir(PROGRESS_DIR, { recursive: true })
+        await writeFile(join(PROGRESS_DIR, `${String(record.time)}-exercise.json`), `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+        await unlink(SPEAKING_SESSION_PATH).catch(() => {
+          // A leftover session document only risks the page offering a finished round
+          // again; the next generation overwrites it.
+        })
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, record }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: speaking result error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: speaking result endpoint')
+
+  // Reading session endpoint: GET returns the pending reading exercise the
+  // exercise-generator skill wrote for the reading page, or null when none is
+  // pending, so a reloaded page restores the round.
+  const webServerForReading = ctx.webServer
+  ctx.effect(() => webServerForReading.register({
+    kind: 'exact',
+    path: '/api/reading',
+    handler: async (_req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const content = await readFile(READING_SESSION_PATH, 'utf8').catch(() => undefined)
+        const exercise = content === undefined ? undefined : parseReadingExercise(content)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ exercise: exercise ?? null }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: reading error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: reading session endpoint')
+
+  // Reading result endpoint: the reading page grades client-side against the
+  // answer key and reports the outcome here. The backend turns it into the same
+  // progress record shape the exercise-generator skill writes for chat-graded
+  // rounds, then retires the session document.
+  const webServerForReadingResult = ctx.webServer
+  ctx.effect(() => webServerForReadingResult.register({
+    kind: 'exact',
+    path: '/api/reading/result',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Method not allowed' }))
+          return
+        }
+        const body = JSON.parse(await readBody(req)) as { count?: number; correct?: number }
+        if (typeof body.count !== 'number' || !Number.isInteger(body.count) || body.count < 1
+          || typeof body.correct !== 'number' || !Number.isInteger(body.correct)
+          || body.correct < 0 || body.correct > body.count) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing or invalid count/correct' }))
+          return
+        }
+        const content = await readFile(READING_SESSION_PATH, 'utf8').catch(() => undefined)
+        const exercise = content === undefined ? undefined : parseReadingExercise(content)
+        if (exercise === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'No reading session is pending' }))
+          return
+        }
+        const record: ProgressRecord = {
+          time: Date.now(),
+          kind: 'exercise',
+          skill: 'reading',
+          count: body.count,
+          correct: body.correct,
+        }
+        if (exercise.material !== undefined) record.material = exercise.material
+        if (exercise.level !== undefined) record.level = exercise.level
+        await mkdir(PROGRESS_DIR, { recursive: true })
+        await writeFile(join(PROGRESS_DIR, `${String(record.time)}-exercise.json`), `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+        await unlink(READING_SESSION_PATH).catch(() => {
+          // A leftover session document only risks the page offering a finished round
+          // again; the next generation overwrites it.
+        })
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, record }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: reading result error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: reading result endpoint')
+
+  // Writing session endpoint: GET returns the pending writing session document —
+  // the assignment while the learner writes, the graded outcome after the skill
+  // critiques the essay — or null when none is pending, so a reloaded page
+  // restores the round at the right phase.
+  const webServerForWriting = ctx.webServer
+  ctx.effect(() => webServerForWriting.register({
+    kind: 'exact',
+    path: '/api/writing',
+    handler: async (_req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const content = await readFile(WRITING_SESSION_PATH, 'utf8').catch(() => undefined)
+        const document = content === undefined ? undefined : parseWritingDocument(content)
+        const doc = document === undefined ? null : document.kind === 'task' ? document.task : document.result
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ doc }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: writing error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: writing session endpoint')
+
+  // Writing result endpoint: the LLM grades the essay and writes the outcome into
+  // the session file; the page reports the score here so it lands as the same
+  // progress record shape the exercise-generator skill writes for chat-graded
+  // rounds (one essay counts as one question, correct at 60 or above), and the
+  // session document is retired.
+  const webServerForWritingResult = ctx.webServer
+  ctx.effect(() => webServerForWritingResult.register({
+    kind: 'exact',
+    path: '/api/writing/result',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Method not allowed' }))
+          return
+        }
+        const body = JSON.parse(await readBody(req)) as { score?: number }
+        if (typeof body.score !== 'number' || !Number.isInteger(body.score) || body.score < 0 || body.score > 100) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing or invalid score' }))
+          return
+        }
+        const content = await readFile(WRITING_SESSION_PATH, 'utf8').catch(() => undefined)
+        const document = content === undefined ? undefined : parseWritingDocument(content)
+        if (document === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'No writing session is pending' }))
+          return
+        }
+        const source = document.kind === 'task' ? document.task : document.result
+        const record: ProgressRecord = {
+          time: Date.now(),
+          kind: 'exercise',
+          skill: 'writing',
+          count: 1,
+          correct: body.score >= 60 ? 1 : 0,
+        }
+        if (source.material !== undefined) record.material = source.material
+        if (source.level !== undefined) record.level = source.level
+        await mkdir(PROGRESS_DIR, { recursive: true })
+        await writeFile(join(PROGRESS_DIR, `${String(record.time)}-exercise.json`), `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+        await unlink(WRITING_SESSION_PATH).catch(() => {
+          // A leftover session document only risks the page offering a finished round
+          // again; the next generation overwrites it.
+        })
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, record }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: writing result error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: writing result endpoint')
+
+  // Skills endpoint: GET lists the preset skills with their frontmatter routing
+  // metadata and the enabled flags from the settings; POST toggles one skill and
+  // persists the disabled list. The provider wrapper and the settings watch pick
+  // the change up, and the tutor's catalog republishes on the next turn.
+  const webServerForSkills = ctx.webServer
+  ctx.effect(() => webServerForSkills.register({
+    kind: 'exact',
+    path: '/api/skills',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method === 'GET') {
+          const dir = resolvePresetSkillsDir()
+          const entries = await readdir(dir, { withFileTypes: true })
+          const candidates: SkillFrontmatter[] = []
+          for (const entry of entries) {
+            if (!entry.isDirectory()) continue
+            const skillContent = await readFile(join(dir, entry.name, 'SKILL.md'), 'utf8').catch(() => undefined)
+            if (skillContent === undefined) continue
+            candidates.push(parseSkillFrontmatter(skillContent))
+          }
+          const skills = mergeSkillInfos(candidates, addedModelsSource.disabledSkills)
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ skills }))
+          return
+        }
+        if (req.method === 'POST') {
+          const body = JSON.parse(await readBody(req)) as { name?: unknown; enabled?: unknown }
+          if (!isSkillName(body.name) || typeof body.enabled !== 'boolean') {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Missing or invalid name/enabled' }))
+            return
+          }
+          const disabledSkills = toggleDisabledSkills(addedModelsSource.disabledSkills, body.name, body.enabled)
+          await scope.update({ disabledSkills })
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, disabledSkills }))
+          return
+        }
+        res.writeHead(405, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Method not allowed' }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: skills error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: skills endpoint')
+
+  // Text-to-speech endpoint: synthesizes any passage with an Edge neural voice for
+  // the listening and speaking pages' players. Upstream failures surface as 502 so
+  // the pages can fall back to browser speech synthesis.
+  const webServerForTts = ctx.webServer
+  ctx.effect(() => webServerForTts.register({
+    kind: 'exact',
+    path: '/api/tts',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Method not allowed' }))
+          return
+        }
+        const body = JSON.parse(await readBody(req)) as { text?: string; voice?: string }
+        if (typeof body.text !== 'string' || body.text.trim() === '' || body.text.length > TTS_MAX_TEXT_LENGTH) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing, empty, or oversized text' }))
+          return
+        }
+        if (!isTtsVoice(body.voice)) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing or invalid voice' }))
+          return
+        }
+        const { audio, contentType } = await synthesizeSpeech(body.text, body.voice, TTS_CACHE_DIR)
+        res.writeHead(200, {
+          'content-type': contentType,
+          'content-length': String(audio.length),
+          'cache-control': 'private, max-age=86400',
+        })
+        res.end(audio)
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: listening audio error: ${reason}`)
+        res.writeHead(502, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: tts endpoint')
+
+  // Listening result endpoint: the listening page grades client-side against the
+  // answer key and reports the outcome here. The backend turns it into the same
+  // progress record shape the exercise-generator skill writes for chat-graded
+  // rounds, then retires the session document.
+  const webServerForListeningResult = ctx.webServer
+  ctx.effect(() => webServerForListeningResult.register({
+    kind: 'exact',
+    path: '/api/listening/result',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Method not allowed' }))
+          return
+        }
+        const body = JSON.parse(await readBody(req)) as { count?: number; correct?: number }
+        if (typeof body.count !== 'number' || !Number.isInteger(body.count) || body.count < 1
+          || typeof body.correct !== 'number' || !Number.isInteger(body.correct)
+          || body.correct < 0 || body.correct > body.count) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing or invalid count/correct' }))
+          return
+        }
+        const content = await readFile(LISTENING_SESSION_PATH, 'utf8').catch(() => undefined)
+        const exercise = content === undefined ? undefined : parseListeningExercise(content)
+        if (exercise === undefined) {
+          res.writeHead(409, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'No listening session is pending' }))
+          return
+        }
+        const record: ProgressRecord = {
+          time: Date.now(),
+          kind: 'exercise',
+          skill: 'listening',
+          count: body.count,
+          correct: body.correct,
+        }
+        if (exercise.material !== undefined) record.material = exercise.material
+        if (exercise.level !== undefined) record.level = exercise.level
+        await mkdir(PROGRESS_DIR, { recursive: true })
+        await writeFile(join(PROGRESS_DIR, `${String(record.time)}-exercise.json`), `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+        await unlink(LISTENING_SESSION_PATH).catch(() => {
+          // A leftover session document only risks the page offering a finished round
+          // again; the next generation overwrites it.
+        })
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, record }))
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        console.error(`english-learning: listening result error: ${reason}`)
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: reason }))
+      }
+    },
+  }), 'english-learning: listening result endpoint')
 
   // Materials endpoints: GET lists, POST adds, DELETE removes. Materials are Markdown
   // files under the launch workspace so chat agents can read them with the read tool.
@@ -1056,8 +1587,13 @@ export function apply(ctx: Context): void {
       const port = ws.port
       const webUrl = `http://127.0.0.1:${String(port)}`
       const connection = ctx.get('connection') as { authenticatedUrl?: (url: string) => string } | undefined
-      const authenticatedUrl = connection?.authenticatedUrl(webUrl) ?? webUrl
+      const authenticatedUrl = connection?.authenticatedUrl?.(webUrl) ?? webUrl
       console.log(`dsh english-learning: ${authenticatedUrl}`)
+      const startup = ctx.get('webStartup') as { openBrowser?: boolean } | undefined
+      if (startup?.openBrowser === false) {
+        console.log('dsh english-learning: --no-open is set; open the URL manually')
+        return
+      }
       console.log('dsh english-learning: opening the default browser; pass --no-open to disable')
       void openBrowser(authenticatedUrl).catch((error: unknown) => {
         const reason = error instanceof Error ? error.message : String(error)
