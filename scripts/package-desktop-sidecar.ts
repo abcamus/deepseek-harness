@@ -34,7 +34,7 @@ const ENTRY = 'node_modules/@deepseek-ai/dsh/lib/bin.js'
 /** Download cache for the Windows node binary, kept across runs. */
 const NODE_CACHE = resolve(root, '.dsh-build/desktop-node-cache')
 /** Mirror-first binaries host; the nodejs.org origin is the fallback. */
-const NODE_BIN_MIRRORS = [
+const NODE_BIN_MIRRORS: ReadonlyArray<(version: string) => string> = [
   version => `https://cdn.npmmirror.com/binaries/node/v${version}/win-x64/node.exe`,
   version => `https://nodejs.org/dist/v${version}/win-x64/node.exe`,
 ]
